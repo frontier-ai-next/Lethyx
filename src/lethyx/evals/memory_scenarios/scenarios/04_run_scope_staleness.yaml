@@ -1,0 +1,40 @@
+id: run_scope_staleness
+description: Stale run-scoped palace.run must not appear for a different run_id.
+workspace: test
+mode: phase_prompt
+
+seed:
+  palace:
+    nodes:
+      - store: palace.run
+        title: Old run plan
+        content: "Stale plan from run_old"
+        tags: ["run", "plan"]
+        scope: run_scoped
+        run_id: run_old
+        phase: plan
+      - store: palace.run
+        title: Current run plan
+        content: "Current plan from run_current"
+        tags: ["run", "plan"]
+        scope: run_scoped
+        run_id: run_current
+        phase: plan
+      - store: palace.lesson
+        title: Cross run lesson
+        content: "Durable cross-run lesson text"
+        tags: ["lesson"]
+        verified: true
+        scope: cross_run_durable
+
+steps:
+  - id: plan_current
+    action: build_phase_task
+    phase: plan
+    run_id: run_current
+
+assert:
+  plan_current:
+    prompt:
+      not_contains:
+        - "Stale plan from run_old"

@@ -1,0 +1,30 @@
+id: smoke_phase_matrix
+description: >
+  Smoke matrix across main phases — injection contract, single ALWAYS-LOADED block,
+  prompt order, drive artifacts when applicable.
+workspace: test
+mode: phase_prompt_matrix
+
+env:
+  LETHYX_ALLOW_VOLATILE_MEMORY_STUB: "1"
+
+seed:
+  workspace_fixture: default
+  manager_fixture: manager_default
+
+assert:
+  matrix_phases:
+    - preflight
+    - research
+    - plan
+    - execute
+    - verify
+    - reflexion
+  run_id: run-smoke-matrix
+  _default:
+    single_always_loaded: true
+    contract:
+      present: true
+    prompt:
+      contains_once:
+        - "## [ALWAYS-LOADED MEMORY]"

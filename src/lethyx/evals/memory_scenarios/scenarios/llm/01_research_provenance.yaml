@@ -1,0 +1,25 @@
+id: llm_research_provenance
+description: Real LLM must respect research provenance BKB and ignore candidate rule.
+workspace: test
+mode: phase_prompt
+
+seed:
+  workspace_fixture: default
+
+steps:
+  - id: research_prompt
+    action: build_phase_task
+    phase: research
+    run_id: run-llm-1
+
+llm:
+  step_id: research_prompt
+  task_question: >
+    Before saving any research finding, what must you do regarding source_id?
+    Answer in one sentence.
+  expect_provenance: true
+  forbid_candidate_phrase: "inject me please"
+
+assert:
+  research_prompt:
+    single_always_loaded: true

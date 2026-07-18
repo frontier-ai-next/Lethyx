@@ -1,0 +1,63 @@
+[build-system]
+requires = ["setuptools>=70"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "lethyx"
+version = "0.1.0"
+description = "Framework-neutral memory layer for agent systems."
+requires-python = ">=3.12"
+readme = "README.md"
+dependencies = [
+    "pydantic>=2.13.4",
+    "pydantic-settings>=2.14.2",
+    "pyyaml>=6.0.3",
+    "rank-bm25>=0.2.2",
+    "mempalace>=3.5.0",
+    "mnemosyne-memory>=3.10.1",
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=9.1.1", "ruff>=0.15.19"]
+hindsight = ["hindsight-client>=0.8.3,<0.9"]
+hindsight-local = ["hindsight-all>=0.8.3,<0.9"]
+bridge = ["fastapi>=0.138.0", "uvicorn[standard]>=0.46.0"]
+openai = ["openai>=2.43.0"]
+mcp = ["mcp>=1.20.0"]
+langgraph = ["langgraph>=1.2.6"]
+
+[project.scripts]
+lethyx = "lethyx.memory.cli:main"
+lethyx-mcp = "lethyx.memory.mcp_server:main"
+lethyx-scenarios = "lethyx.evals.memory_scenarios.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+include = ["lethyx*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["src"]
+markers = [
+    "memory_contract: core memory injection invariants",
+    "memory_slow: optional persistent backend matrix",
+    "hindsight: optional real Hindsight server tests",
+    "hindsight_real: requires real Hindsight server",
+    "llm_memory: opt-in LLM behavioral memory tests",
+]
+
+[tool.ruff]
+target-version = "py312"
+line-length = 100
+force-exclude = true
+extend-exclude = [
+    ".external",
+    ".hermes",
+    ".memory_bench_cache",
+    ".mrt",
+    ".pytest_cache",
+    ".ruff_cache",
+    "build",
+    "dist",
+    "runs",
+]

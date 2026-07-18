@@ -1,0 +1,36 @@
+[build-system]
+requires = ["setuptools>=70"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "memory-bench"
+version = "0.1.0"
+description = "Provider-agnostic memory evaluation framework (any memory × any benchmark)"
+requires-python = ">=3.11"
+readme = "README.md"
+dependencies = [
+    # Core: no hard deps beyond stdlib + openai (optional; required for LLMResponder/LLMJudge)
+    # openai>=2.43.0
+]
+
+[project.optional-dependencies]
+openai = ["openai>=2.43.0"]
+bm25 = ["rank-bm25>=0.2.2"]
+dev = ["pytest>=9.1.1", "openai>=2.43.0", "rank-bm25>=0.2.2", "ruff>=0.15.19"]
+
+[project.scripts]
+memory-bench = "memory_bench.cli:main"
+
+# Entry-points for third-party providers / benchmarks / judges
+[project.entry-points."memory_bench.providers"]
+# example: my_provider = "my_package.adapters:MyProvider"
+
+[project.entry-points."memory_bench.benchmarks"]
+# example: my_bench = "my_package.benchmarks:MyBenchmark"
+
+[project.entry-points."memory_bench.judges"]
+# example: my_judge = "my_package.judges:MyJudge"
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["memory_bench*"]

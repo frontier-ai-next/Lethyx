@@ -1,0 +1,26 @@
+id: llm_verify_no_research_bkb
+description: Verify phase must not treat research-only BKB as mandatory.
+workspace: test
+mode: phase_prompt
+
+seed:
+  workspace_fixture: default
+
+steps:
+  - id: verify_prompt
+    action: build_phase_task
+    phase: verify
+    run_id: run-llm-3
+
+llm:
+  step_id: verify_prompt
+  task_question: >
+    List the mandatory research-phase source_id rules you must follow during verify.
+    If none apply to verify, say none.
+  forbid_research_rule: true
+
+assert:
+  verify_prompt:
+    bkb:
+      skipped_ids:
+        - test_active_provenance

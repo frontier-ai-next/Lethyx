@@ -1,0 +1,48 @@
+levels:
+  manager_core:
+    kinds: [charter, identity, architecture_contract]
+    store: palace.charter
+    tier: always_on
+    surface: directive
+    direct_agent_write: false
+  active_bkb:
+    kinds: [bkb_rule, behavior, invariant, prospective_trigger]
+    store: palace.lesson
+    tier: warm
+    surface: directive
+    promotion_gate_required: true
+  verified_lessons:
+    kinds: [lesson, verified_finding]
+    store: palace.lesson
+    tier: warm
+    surface: supplemental_evidence
+  project_ideas:
+    kinds: [idea, hypothesis, research_lead]
+    store: ideas.jsonl
+    tier: cold
+    surface: reflection_candidate
+  research_findings:
+    kinds: [research_finding]
+    store: palace.run
+    tier: hot
+    surface: current_run_state
+  current_run_state:
+    kinds: [phase_plan, subtask_card, execution_artifact]
+    store: palace.run
+    tier: hot
+    surface: current_run_state
+  logs:
+    kinds: [tool_log, terminal_scrollback, watcher_incident]
+    store: palace.transient
+    tier: transient
+    surface: archive_hint
+  external_projects:
+    kinds: [github_project, repo_capsule, code_chunk]
+    store: palace.codeptr
+    tier: warm
+    surface: supplemental_evidence
+  hindsight_candidates:
+    kinds: [hindsight_candidate, reflection]
+    store: bkb_proposals
+    tier: cold
+    surface: reflection_candidate

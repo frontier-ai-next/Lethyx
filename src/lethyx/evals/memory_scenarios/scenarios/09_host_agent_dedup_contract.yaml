@@ -1,0 +1,23 @@
+id: host_agent_dedup_contract
+description: Host agents must not duplicate Lethyx-injected always-loaded memory.
+workspace: test
+mode: phase_prompt
+
+steps:
+  - id: verify_task
+    action: build_phase_task
+    phase: verify
+    run_id: run-dedup-1
+
+  - id: host_agent_dedup
+    action: init_host_agent_memory
+    phase: verify
+    run_id: run-dedup-1
+    args:
+      task_step_id: verify_task
+
+assert:
+  verify_task:
+    single_always_loaded: true
+    contract:
+      present: true

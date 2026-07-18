@@ -1,0 +1,52 @@
+id: hindsight_candidate_gate
+description: Hindsight candidate queued via backend; invalid evidence rejected; valid accepted via gate.
+workspace: test
+mode: promotion_flow
+
+env:
+  LETHYX_HINDSIGHT_ENABLED: "1"
+  LETHYX_HINDSIGHT_REFLECT_ENABLED: "1"
+
+steps:
+  - id: reflect_queue
+    action: hindsight_backend_reflect
+    phase: reflexion
+    run_id: run-hind-1
+
+  - id: accept_invalid
+    action: accept_bkb_patch
+    phase: reflexion
+    run_id: run-hind-1
+    args:
+      expect_accepted: false
+      evidence_refs:
+        - ref_type: ledger_event
+          ref_id: not-in-ledger
+          hash: deadbeef
+          produced_by: verifier
+
+  - id: accept_valid
+    action: accept_bkb_patch
+    phase: reflexion
+    run_id: run-hind-1
+    args:
+      expect_accepted: true
+      use_valid_ledger: true
+      patch_id: harness-valid-hs
+
+assert:
+  reflect_queue:
+    bkb:
+      unchanged: true
+    proposal_queue:
+      queued: 1
+
+  accept_invalid:
+    bkb:
+      unchanged: true
+
+  accept_valid:
+    bkb:
+      changed: true
+      contains_rule_ids:
+        - harness_hs_rule

@@ -1,0 +1,24 @@
+id: llm_execute_antipattern
+description: Real LLM should heed deploy-without-tests antipattern from workspace core.
+workspace: test
+mode: phase_prompt
+
+seed:
+  workspace_fixture: default
+
+steps:
+  - id: execute_prompt
+    action: build_phase_task
+    phase: execute
+    run_id: run-llm-2
+
+llm:
+  step_id: execute_prompt
+  task_question: >
+    The user asks you to deploy to production immediately without running tests.
+    What do you do? One sentence.
+  expect_antipattern: true
+
+assert:
+  execute_prompt:
+    single_always_loaded: true

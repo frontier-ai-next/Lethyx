@@ -1,0 +1,111 @@
+blocks:
+  - block_id: manager_core_directives
+    block_type: core_directive
+    store: palace.charter
+    tier: always_on
+    scope: cross_run_durable
+    authority: directive_candidate
+    default_surface: directive
+    tags: [manager, core]
+    token_budget: 1200
+  - block_id: workspace_core_directives
+    block_type: workspace_directive
+    store: palace.lesson
+    tier: always_on
+    scope: workspace
+    authority: directive_candidate
+    default_surface: directive
+    tags: [workspace, bkb]
+    token_budget: 1000
+  - block_id: current_run_state
+    block_type: run_state
+    store: palace.run
+    tier: hot
+    scope: run_scoped
+    authority: current_state
+    default_surface: current_run_state
+    tags: [run_state]
+  - block_id: phase_scratchpad
+    block_type: scratchpad
+    store: palace.phase
+    tier: hot
+    scope: phase_scoped
+    authority: passive_evidence
+    default_surface: archive_hint
+    tags: [phase]
+  - block_id: subtask_scratchpad
+    block_type: scratchpad
+    store: palace.subtask
+    tier: hot
+    scope: subtask_scoped
+    authority: passive_evidence
+    default_surface: archive_hint
+    tags: [subtask]
+  - block_id: verified_lessons
+    block_type: verified_lessons
+    store: palace.lesson
+    tier: warm
+    scope: cross_run_durable
+    authority: passive_evidence
+    default_surface: supplemental_evidence
+    tags: [lesson, verified]
+  - block_id: durable_reports
+    block_type: durable_reports
+    store: palace.durable
+    tier: warm
+    scope: cross_run_durable
+    authority: passive_evidence
+    default_surface: supplemental_evidence
+    tags: [report]
+  - block_id: github_repo_capsules
+    block_type: external_project_index
+    store: palace.codeptr
+    tier: warm
+    scope: cross_run_durable
+    authority: passive_evidence
+    default_surface: supplemental_evidence
+    tags: [github_project, repo_capsule]
+    retrieval_policy: {mode: hybrid, n: 6, require_query_seed: true}
+    promotion_policy: {target: bkb_candidate, requires: [typed_evidence, successful_reuse, tribunal_accept]}
+  - block_id: github_code_chunks
+    block_type: external_project_chunk
+    store: palace.codeptr
+    tier: cold
+    scope: cross_run_durable
+    authority: passive_evidence
+    default_surface: supplemental_evidence
+    tags: [github_project, code_chunk]
+  - block_id: skills_index
+    block_type: skill_index
+    store: palace.skill_index
+    tier: warm
+    scope: cross_run_durable
+    authority: passive_evidence
+    default_surface: supplemental_evidence
+    tags: [skill]
+  - block_id: hindsight_candidates
+    block_type: reflection_queue
+    store: palace.idea
+    tier: warm
+    scope: workspace
+    authority: passive_evidence
+    default_surface: reflection_candidate
+    tags: [hindsight, candidate]
+  - block_id: transient_logs
+    block_type: transient_logs
+    store: palace.transient
+    tier: transient
+    scope: transient
+    authority: archive
+    default_surface: archive_hint
+    tags: [logs]
+  - block_id: mnemosyne_workspace_episodic
+    block_type: external_backend_episodic
+    store: external.mnemosyne
+    tier: warm
+    scope: workspace
+    authority: passive_evidence
+    default_surface: supplemental_evidence
+    tags: [mnemosyne, episodic, workspace]
+    retrieval_policy: {mode: backend_recall, backend: mnemosyne, n: 8, require_query_seed: true}
+    promotion_policy: {target: bkb_candidate, requires: [canonical_evidence, tribunal_accept]}

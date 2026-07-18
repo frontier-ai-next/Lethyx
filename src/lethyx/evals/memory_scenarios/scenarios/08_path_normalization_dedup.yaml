@@ -1,0 +1,18 @@
+id: path_normalization_dedup
+description: palace_add with workspaces/ prefix does not create nested workspaces dir.
+workspace: test
+mode: tool_flow
+
+steps:
+  - id: palace_add_paths
+    action: palace_add
+    phase: research
+    run_id: run-path-1
+    args:
+      title: Path harness
+      content: Path normalization body
+      palace_path: workspaces/test/research
+      workspace_id: workspaces/test
+      tags: observation,research
+
+assert: {}

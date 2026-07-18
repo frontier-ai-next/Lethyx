@@ -1,0 +1,37 @@
+id: workspace_isolation
+description: Workspace BKB and charter must not leak across ws_a and ws_b.
+workspace: test
+mode: phase_prompt
+
+seed:
+  extra_workspaces:
+    ws_a: ws_a
+    ws_b: ws_b
+
+steps:
+  - id: ws_a_prompt
+    action: build_phase_task
+    phase: plan
+    run_id: run-iso-1
+    workspace_id: ws_a
+
+  - id: ws_b_prompt
+    action: build_phase_task
+    phase: plan
+    run_id: run-iso-1
+    workspace_id: ws_b
+
+assert:
+  ws_a_prompt:
+    prompt:
+      contains:
+        - "API A"
+      not_contains:
+        - "API B"
+
+  ws_b_prompt:
+    prompt:
+      contains:
+        - "API B"
+      not_contains:
+        - "API A"

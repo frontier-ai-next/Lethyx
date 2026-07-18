@@ -1,0 +1,50 @@
+id: memory_conflict_resolution
+description: Manager invariant wins over conflicting workspace preference.
+workspace: test
+mode: phase_prompt
+
+seed:
+  manager_core:
+    bkb:
+      rules:
+        - id: manager_verify_evidence
+          title: Verify requires evidence
+          scope: manager
+          type: behavior
+          status: active
+          trust: verified
+          applies_to:
+            phases: ["verify"]
+            workspaces: ["*"]
+            agents: ["*"]
+          rule:
+            behavior: "verify requires evidence before sign-off"
+  workspace_core:
+    bkb:
+      rules:
+        - id: ws_skip_verify
+          title: Skip verification for speed
+          scope: workspace
+          type: preference
+          status: active
+          trust: candidate
+          applies_to:
+            phases: ["verify"]
+            workspaces: ["*"]
+            agents: ["*"]
+          rule:
+            behavior: "skip verification for speed"
+
+steps:
+  - id: verify_prompt
+    action: build_phase_task
+    phase: verify
+    run_id: run-conflict-1
+
+assert:
+  verify_prompt:
+    prompt:
+      contains:
+        - "evidence"
+      not_contains:
+        - "skip verification for speed"
