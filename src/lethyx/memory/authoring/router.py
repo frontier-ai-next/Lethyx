@@ -2,17 +2,32 @@
 
 import json
 import time
-from dataclasses import asdict
+from dataclasses import asdict, replace
 from pathlib import Path
 
 from lethyx.memory.authoring.models import MemoryRouteDecision, MemoryWriteProposal
 from lethyx.memory.authoring.policy import route_by_taxonomy
 from lethyx.memory.blocks.registry import load_memory_blocks
+from lethyx.memory.blocks.catalog import compile_semantic_catalog
 
 
-def route_memory_write(repo_root: Path, write: MemoryWriteProposal) -> MemoryRouteDecision:
-    blocks = load_memory_blocks(Path(repo_root), write.workspace_id)
-    return route_by_taxonomy(write, blocks)
+def route_memory_write(
+    repo_root: Path,
+    write: MemoryWriteProposal,
+    *,
+    profile_id: str = "default",
+) -> MemoryRouteDecision:
+    blocks = load_memory_blocks(
+        Path(repo_root),
+        write.workspace_id,
+        profile_id=profile_id,
+        strict=True,
+    )
+    decision = route_by_taxonomy(write, blocks)
+    return replace(
+        decision,
+        catalog_revision_id=compile_semantic_catalog(blocks).revision_id,
+    )
 
 
 def write_authoring_event(

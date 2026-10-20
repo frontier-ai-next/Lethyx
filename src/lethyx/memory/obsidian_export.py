@@ -1,7 +1,7 @@
 """Export Lethyx memory records to an Obsidian-compatible live vault.
 
-The Obsidian vault is the human-facing surface of the real Lethyx runtime
-memory. It must not look like a migration log or a backend dump: project folders
+The Obsidian vault is the human-facing view of the real Lethyx runtime
+memory. It must not look like a backend dump: project folders
 contain readable memory areas, typed notes, and a compact index. Runtime
 authority still lives in the Lethyx metadata preserved in YAML frontmatter.
 """
@@ -13,16 +13,16 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Iterable, Sequence
 
-from lethyx.memory.backends.contracts import MemoryBlockRecord, MemoryEdgeRecord
+from lethyx.contracts import MemoryBlockRecord
+from lethyx.contracts import is_protected_memory
+from lethyx.contracts.memory import memory_scope_key
+from lethyx.memory.backends.contracts import MemoryEdgeRecord
+from lethyx.memory.scopes import OrderedScopeChain
 
-_HIDDEN_EXPORT_LIFECYCLES = {"retracted", "quarantined", "superseded", "deprecated"}
+_HIDDEN_EXPORT_STATUSES = {"retracted", "quarantined", "superseded", "deprecated"}
 _HIDDEN_EXPORT_KINDS = {"source_index"}
 _HIDDEN_EXPORT_TAGS = {"source-node"}
-_HIDDEN_EXPORT_PRIVACY_CLASSES = {"secret", "secret_pointer", "non-injectable", "non_injectable"}
-_SERVICE_DIRS = {"Graphs", "NotebookLM", "Notes", ".obsidian"}
 _CANONICAL_CORE_DIR = "Core"
-_LEGACY_CORE_DIRS = {"Memory"}
-_LEGACY_ROOT_FILES = {"Core Memory Index.md", "Untitled.canvas"}
 _EVIDENCE_AREAS = {"Session summaries", "Candidate ideas", "Archive"}
 _CANONICAL_CORE_AREAS = (
     "Project knowledge",
@@ -42,6 +42,22 @@ _CANONICAL_EVIDENCE_CATEGORIES = (
     "Questions",
     "Archive",
 )
+_HIDDEN_EXPORT_METADATA = {
+    "native_score",
+    "raw_backend_score",
+    "retrieval_score",
+}
+
+
+def _hidden_export_metadata_key(key: object) -> bool:
+    text = str(key).casefold()
+    return (
+        text in _HIDDEN_EXPORT_METADATA
+        or text == "store"
+        or text.endswith("_store")
+        or text.split("_")[-2:] == ["write", "policy"]
+    )
+
 
 _AREA_ORDER = {
     "User profile": 10,
@@ -64,9 +80,7 @@ class ObsidianExportResult:
     vault_dir: Path
     workspace_id: str
     index_path: Path
-    # Kept for API compatibility with older callers/tests; this is now a clean
-    # project overview note, not a NotebookLM/service export.
-    notebooklm_source_path: Path
+    memory_overview_path: Path
     block_paths: dict[str, Path]
     written_files: tuple[Path, ...]
 
@@ -148,19 +162,8 @@ def _tag_set(block: MemoryBlockRecord) -> set[str]:
     return {str(tag).strip().lower() for tag in (block.tags or ()) if str(tag).strip()}
 
 
-def _metadata_text(block: MemoryBlockRecord, key: str) -> str:
-    return str((block.metadata or {}).get(key) or "").strip().lower()
-
-
-def _effective_tier(block: MemoryBlockRecord) -> str:
-    meta_tier = _metadata_text(block, "tier")
-    if meta_tier:
-        return meta_tier
-    for tag in block.tags or ():
-        text = str(tag or "").strip().lower()
-        if text.startswith("tier:") and text.split(":", 1)[1].strip():
-            return text.split(":", 1)[1].strip()
-    return str(block.tier or "warm").strip().lower() or "warm"
+def _effective_temperature(block: MemoryBlockRecord) -> str:
+    return str(block.temperature or "warm").strip().lower() or "warm"
 
 
 def memory_area_for_block(block: MemoryBlockRecord) -> str:
@@ -169,15 +172,15 @@ def memory_area_for_block(block: MemoryBlockRecord) -> str:
     tags = _tag_set(block)
     block_id = str(block.block_id or "").lower()
     kind = str(block.kind or "").lower()
-    surface = str(block.surface or "").lower()
-    lifecycle = str(block.lifecycle or "").lower()
-    tier = _effective_tier(block)
+    delivery_policy = str(block.delivery_policy or "").lower()
+    status = str(block.status or "").lower()
+    temperature = _effective_temperature(block)
 
     if block_id.startswith("user_profile_") or "target:user" in tags:
         return "User profile"
     if block_id.startswith("profile_memory_") or "target:memory" in tags:
         return "Agent profile memory"
-    if "session" in kind or "session-migration" in tags or block_id.startswith("session_"):
+    if "session" in kind or block_id.startswith("session_"):
         return "Session summaries"
     if "skill" in kind or "skill-index" in tags or "skill" in tags:
         return "Skills"
@@ -186,8 +189,8 @@ def memory_area_for_block(block: MemoryBlockRecord) -> str:
     if "doc" in kind or "project-doc" in tags or "project-doc-pointer" in tags:
         return "Project documents"
     if (
-        lifecycle == "candidate"
-        or surface == "reflection_candidate"
+        status == "candidate"
+        or delivery_policy == "reflection_only"
         or kind
         in {
             "idea",
@@ -196,7 +199,7 @@ def memory_area_for_block(block: MemoryBlockRecord) -> str:
         }
     ):
         return "Candidate ideas"
-    if lifecycle == "archived" or surface == "archive_hint" or tier == "cold":
+    if block.retention == "archive" or delivery_policy == "hidden" or temperature == "cold":
         return "Archive"
     if kind in {
         "lesson",
@@ -217,13 +220,14 @@ def _is_evidence_archive_block(block: MemoryBlockRecord) -> bool:
     if area in _EVIDENCE_AREAS:
         return True
     kind = str(block.kind or "").lower()
-    surface = str(block.surface or "").lower()
-    lifecycle = str(block.lifecycle or "").lower()
+    delivery_policy = str(block.delivery_policy or "").lower()
+    status = str(block.status or "").lower()
     return (
         "session" in kind
-        or lifecycle in {"candidate", "archived"}
-        or surface in {"archive_hint", "reflection_candidate"}
-        or _effective_tier(block) in {"cold", "transient"}
+        or status == "candidate"
+        or block.retention == "archive"
+        or delivery_policy in {"hidden", "reflection_only"}
+        or _effective_temperature(block) == "cold"
     )
 
 
@@ -247,7 +251,7 @@ def _yaml_scalar(value: object) -> str:
 
 
 def _frontmatter(block: MemoryBlockRecord, *, area: str) -> str:
-    tier = _effective_tier(block)
+    temperature = _effective_temperature(block)
     lines = [
         "---",
         f"id: {_yaml_scalar(block.block_id)}",
@@ -255,14 +259,19 @@ def _frontmatter(block: MemoryBlockRecord, *, area: str) -> str:
         f"workspace_id: {_yaml_scalar(block.workspace_id)}",
         f"area: {_yaml_scalar(area)}",
         f"kind: {_yaml_scalar(block.kind)}",
-        f"tier: {_yaml_scalar(tier)}",
+        f"temperature: {_yaml_scalar(temperature)}",
         f"scope: {_yaml_scalar(block.scope)}",
-        f"surface: {_yaml_scalar(block.surface)}",
-        f"lifecycle: {_yaml_scalar(block.lifecycle)}",
+        f"status: {_yaml_scalar(block.status)}",
+        f"retention: {_yaml_scalar(block.retention)}",
+        f"delivery_policy: {_yaml_scalar(block.delivery_policy)}",
+        f"authority: {_yaml_scalar(block.authority)}",
         f"trust_level: {_yaml_scalar(block.trust_level)}",
+        f"verification_status: {_yaml_scalar(block.verification_status)}",
+        f"promotion_decision: {_yaml_scalar(block.promotion_decision)}",
         f"source_backend: {_yaml_scalar(block.source_backend)}",
-        f"privacy_class: {_yaml_scalar(block.privacy_class)}",
-        f"verified: {str(bool(block.verified)).lower()}",
+        f"sensitivity: {_yaml_scalar(block.sensitivity)}",
+        f"content_mode: {_yaml_scalar(block.content_mode)}",
+        f"operational_risk: {_yaml_scalar(block.operational_risk)}",
         "tags:",
     ]
     if block.tags:
@@ -271,8 +280,6 @@ def _frontmatter(block: MemoryBlockRecord, *, area: str) -> str:
         lines.append("  []")
     if block.run_id:
         lines.append(f"run_id: {_yaml_scalar(block.run_id)}")
-    if block.phase_id:
-        lines.append(f"phase_id: {_yaml_scalar(block.phase_id)}")
     if block.subtask_id:
         lines.append(f"subtask_id: {_yaml_scalar(block.subtask_id)}")
     if block.evidence_refs:
@@ -283,6 +290,9 @@ def _frontmatter(block: MemoryBlockRecord, *, area: str) -> str:
             produced_by = getattr(ref, "produced_by", "")
             if produced_by:
                 lines.append(f"    produced_by: {_yaml_scalar(produced_by)}")
+            producer_id = getattr(ref, "producer_id", "")
+            if producer_id:
+                lines.append(f"    producer_id: {_yaml_scalar(producer_id)}")
     lines.append("---")
     return "\n".join(lines)
 
@@ -291,30 +301,31 @@ def _edge_label(edge_type: str) -> str:
     return str(edge_type or "related").replace("_", " ").strip().title() or "Related"
 
 
-def _block_in_scope(block: MemoryBlockRecord, *, workspace_id: str, include_global: bool) -> bool:
-    if str(block.lifecycle or "").lower() in _HIDDEN_EXPORT_LIFECYCLES:
+def _block_in_scope(block: MemoryBlockRecord, *, scope_chain: tuple[str, ...]) -> bool:
+    if str(block.status or "").lower() in _HIDDEN_EXPORT_STATUSES:
         return False
     if str(block.kind or "").lower() in _HIDDEN_EXPORT_KINDS:
         return False
-    if str(block.privacy_class or "").strip().lower() in _HIDDEN_EXPORT_PRIVACY_CLASSES:
+    if is_protected_memory(block.sensitivity, block.content_mode, block.operational_risk):
         return False
     if any(str(tag).lower() in _HIDDEN_EXPORT_TAGS for tag in (block.tags or ())):
         return False
-    if block.workspace_id == workspace_id:
-        return True
-    if include_global and (
-        (not block.workspace_id and block.scope in {"manager", "cross_run_durable"})
-        or block.workspace_id in {"global", "shared"}
-    ):
-        return True
-    return False
+    try:
+        return memory_scope_key(block) in scope_chain
+    except ValueError:
+        return False
 
 
 def _block_preference_key(block: MemoryBlockRecord) -> tuple[int, int, int, str]:
-    lifecycle_rank = {"active": 0, "candidate": 1, "archived": 2}.get(block.lifecycle, 3)
-    verified_rank = 0 if block.verified else 1
+    status_rank = {"accepted": 0, "candidate": 1}.get(block.status, 2)
+    verification_rank = 0 if block.verification_status == "verified" else 1
     backend_rank = {"mempalace": 0, "hindsight": 1, "mnemosyne": 2}.get(block.source_backend, 3)
-    return (lifecycle_rank, verified_rank, backend_rank, block.updated_at or block.created_at or "")
+    return (
+        status_rank,
+        verification_rank,
+        backend_rank,
+        block.updated_at or block.created_at or "",
+    )
 
 
 def _dedupe_blocks(blocks: Iterable[MemoryBlockRecord]) -> list[MemoryBlockRecord]:
@@ -328,13 +339,9 @@ def _dedupe_blocks(blocks: Iterable[MemoryBlockRecord]) -> list[MemoryBlockRecor
 
 
 def _scoped_blocks(
-    blocks: Iterable[MemoryBlockRecord], *, workspace_id: str, include_global: bool
+    blocks: Iterable[MemoryBlockRecord], *, scope_chain: tuple[str, ...]
 ) -> list[MemoryBlockRecord]:
-    selected = [
-        block
-        for block in blocks
-        if _block_in_scope(block, workspace_id=workspace_id, include_global=include_global)
-    ]
+    selected = [block for block in blocks if _block_in_scope(block, scope_chain=scope_chain)]
     return _dedupe_blocks(selected)
 
 
@@ -366,10 +373,7 @@ def _edges_for_block(
 
 
 def _backend_sentence(block: MemoryBlockRecord) -> str:
-    role = _metadata_text(block, "memory_block_role") or "active"
-    physical = block.source_backend or _metadata_text(block, "memory_block_backend") or "unknown"
-    logical = _metadata_text(block, "memory_block_id") or physical
-    return f"{physical} / {logical} / {role}"
+    return str(block.source_backend or "unknown")
 
 
 def _render_block_note(
@@ -380,13 +384,13 @@ def _render_block_note(
 ) -> str:
     area = memory_area_for_block(block)
     title = block.title or block.block_id
-    tier = _effective_tier(block)
+    temperature = _effective_temperature(block)
     lines = [
         _frontmatter(block, area=area),
         "",
         f"# {title}",
         "",
-        f"> Area: **{area}** · Tier: `{tier}` · Lifecycle: `{block.lifecycle}` · Trust: `{block.trust_level}`",
+        f"> Area: **{area}** · Temperature: `{temperature}` · Status: `{block.status}` · Trust: `{block.trust_level}`",
         "",
         "## Memory",
         "",
@@ -397,9 +401,10 @@ def _render_block_note(
         f"- Workspace: `{block.workspace_id or 'global/manager'}`",
         f"- Kind: `{block.kind}`",
         f"- Scope: `{block.scope}`",
-        f"- Surface: `{block.surface}`",
+        f"- Delivery policy: `{block.delivery_policy}`",
+        f"- Authority: `{block.authority}`",
         f"- Backend block: `{_backend_sentence(block)}`",
-        f"- Verified: `{str(bool(block.verified)).lower()}`",
+        f"- Verification: `{block.verification_status}` via `{', '.join(block.verification_methods) or 'none'}`",
     ]
     if block.evidence_refs:
         lines.extend(["", "## Evidence", ""])
@@ -431,15 +436,7 @@ def _render_block_note(
     public_metadata = {
         key: value
         for key, value in sorted((block.metadata or {}).items())
-        if value not in (None, "")
-        and key
-        not in {
-            "memory_block_rank",
-            "memory_block_rrf_score",
-            "raw_backend_score",
-            "retrieval_score",
-            "native_score",
-        }
+        if value not in (None, "") and not _hidden_export_metadata_key(key)
     }
     if public_metadata:
         lines.extend(["", "## Details", ""])
@@ -461,10 +458,9 @@ def _sort_blocks_for_index(
     return sorted(
         blocks,
         key=lambda block: (
-            {"always_on": 0, "hot": 1, "warm": 2, "cold": 3, "transient": 4}.get(
-                _effective_tier(block), 9
-            ),
-            {"active": 0, "candidate": 1, "archived": 2}.get(block.lifecycle, 9),
+            {"always_on": 0, "working_set": 1, "on_demand": 2}.get(block.delivery_policy, 3),
+            {"hot": 0, "warm": 1, "cold": 2}.get(_effective_temperature(block), 3),
+            {"accepted": 0, "candidate": 1}.get(block.status, 2),
             note_names.get(block.block_id, block.block_id).lower(),
         ),
     )
@@ -477,16 +473,16 @@ def _render_index(
     note_names: dict[str, str],
     evidence_blocks: Sequence[MemoryBlockRecord] = (),
 ) -> str:
-    tier_counts: dict[str, int] = {}
+    temperature_counts: dict[str, int] = {}
     backend_counts: dict[str, int] = {}
-    lifecycle_counts: dict[str, int] = {}
+    status_counts: dict[str, int] = {}
     for block in blocks:
-        tier = _effective_tier(block)
-        tier_counts[tier] = tier_counts.get(tier, 0) + 1
+        temperature = _effective_temperature(block)
+        temperature_counts[temperature] = temperature_counts.get(temperature, 0) + 1
         backend_counts[block.source_backend or "unknown"] = (
             backend_counts.get(block.source_backend or "unknown", 0) + 1
         )
-        lifecycle_counts[block.lifecycle] = lifecycle_counts.get(block.lifecycle, 0) + 1
+        status_counts[block.status] = status_counts.get(block.status, 0) + 1
 
     lines = [
         f"# {project_title} memory",
@@ -504,8 +500,8 @@ def _render_index(
         "",
         f"- Core memory blocks: **{len(blocks)}**",
         f"- Evidence/archive blocks kept in backend: **{len(evidence_blocks)}**",
-        f"- Tiers: {', '.join(f'{key}={value}' for key, value in sorted(tier_counts.items())) or 'none'}",
-        f"- Lifecycles: {', '.join(f'{key}={value}' for key, value in sorted(lifecycle_counts.items())) or 'none'}",
+        f"- Temperatures: {', '.join(f'{key}={value}' for key, value in sorted(temperature_counts.items())) or 'none'}",
+        f"- Statuses: {', '.join(f'{key}={value}' for key, value in sorted(status_counts.items())) or 'none'}",
         f"- Backends: {', '.join(f'{key}={value}' for key, value in sorted(backend_counts.items())) or 'none'}",
         "",
         "## Authority rule",
@@ -568,10 +564,7 @@ def _evidence_category(block: MemoryBlockRecord) -> str:
         return "Outcomes"
     if kind == "open_question":
         return "Questions"
-    if (
-        str(block.lifecycle or "").lower() == "archived"
-        or str(block.surface or "").lower() == "archive_hint"
-    ):
+    if block.retention == "archive" or block.delivery_policy == "hidden":
         return "Archive"
     return "Candidate ideas"
 
@@ -583,7 +576,7 @@ def _render_evidence_note(block: MemoryBlockRecord, *, session_hub_target: str =
         "",
         f"# {block.title or block.block_id}",
         "",
-        f"> Evidence category: **{_evidence_category(block)}** · Tier: `{_effective_tier(block)}` · Lifecycle: `{block.lifecycle}` · Surface: `{block.surface}` · Backend: `{block.source_backend or 'unknown'}`",
+        f"> Evidence category: **{_evidence_category(block)}** · Temperature: `{_effective_temperature(block)}` · Status: `{block.status}` · Delivery: `{block.delivery_policy}` · Backend: `{block.source_backend or 'unknown'}`",
         "",
         "This note is source/candidate/session evidence. It can help recall and audit, but it is not a directive or stable project fact until promoted into core memory.",
         "",
@@ -595,7 +588,11 @@ def _render_evidence_note(block: MemoryBlockRecord, *, session_hub_target: str =
     if session_hub_target:
         lines.extend(["## Navigation", "", f"- Session hub: {_wikilink(session_hub_target)}", ""])
     if block.metadata:
-        visible = {k: v for k, v in block.metadata.items() if k not in {"raw", "payload"}}
+        visible = {
+            key: value
+            for key, value in block.metadata.items()
+            if key not in {"raw", "payload"} and not _hidden_export_metadata_key(key)
+        }
         if visible:
             lines.extend(["## Metadata", ""])
             for key in sorted(visible):
@@ -664,7 +661,7 @@ def _render_core_area_hub(
         lines.append("No blocks in this category yet.")
         return "\n".join(lines).rstrip() + "\n"
     for block in _sort_blocks_for_index(blocks, note_names):
-        suffix = f"`{_effective_tier(block)}` / `{block.lifecycle}` / `{block.source_backend or 'unknown'}`"
+        suffix = f"`{_effective_temperature(block)}` / `{block.status}` / `{block.source_backend or 'unknown'}`"
         lines.append(
             f"- {_wikilink(block_targets[block.block_id], note_names[block.block_id])} — {suffix}"
         )
@@ -777,7 +774,7 @@ def _render_evidence_archive(
     lines = [
         f"# {project_title} evidence archive",
         "",
-        "This legacy-facing note intentionally links only to the evidence index, not to every evidence leaf. Use the hub hierarchy to avoid an Obsidian graph dandelion.",
+        "This note intentionally links only to the evidence index, not to every evidence leaf. Use the hub hierarchy to avoid an Obsidian graph dandelion.",
         "",
         f"- {_wikilink(evidence_index_target, 'Evidence Index')}",
         f"- Total evidence blocks: **{len(blocks)}**",
@@ -934,38 +931,26 @@ def export_records_to_obsidian(
     vault_dir: str | Path,
     workspace_id: str,
     project_title: str = "",
-    include_global: bool = False,
+    scope_chain: tuple[str, ...] = (),
 ) -> ObsidianExportResult:
-    """Write scoped Lethyx records into a clean Obsidian project folder.
-
-    `include_global` is intentionally false by default so manager/global memory
-    never leaks into a project export without explicit caller intent.
-    """
+    """Write records authorized by one exact ordered scope chain."""
 
     vault = Path(vault_dir)
     workspace = _safe_id(workspace_id or "default")
+    effective_scope_chain = scope_chain or (f"workspace:{workspace_id}",)
+    effective_scope_chain = OrderedScopeChain.from_keys(tuple(effective_scope_chain)).keys
     title = project_title or workspace_id or "Lethyx"
     lethyx_root = vault / "Lethyx"
     project_root = lethyx_root / "Projects" / workspace
     core_dir = project_root / _CANONICAL_CORE_DIR
     evidence_dir = project_root / "Evidence"
 
-    # Remove old experimental/service surfaces before writing the canonical view.
-    _remove_tree(lethyx_root / "Graphs")
-    for dirname in _SERVICE_DIRS:
-        _remove_tree(project_root / dirname)
-    for dirname in _LEGACY_CORE_DIRS:
-        _remove_tree(project_root / dirname)
-    for filename in _LEGACY_ROOT_FILES:
-        (project_root / filename).unlink(missing_ok=True)
     _remove_tree(core_dir)
     _remove_tree(evidence_dir)
 
     core_dir.mkdir(parents=True, exist_ok=True)
 
-    selected_blocks = _scoped_blocks(
-        list(blocks), workspace_id=workspace_id, include_global=include_global
-    )
+    selected_blocks = _scoped_blocks(list(blocks), scope_chain=effective_scope_chain)
     core_blocks = [block for block in selected_blocks if not _is_evidence_archive_block(block)]
     evidence_blocks = [block for block in selected_blocks if _is_evidence_archive_block(block)]
     selected_edges = list(edges)
@@ -1186,7 +1171,7 @@ def export_records_to_obsidian(
         vault_dir=vault,
         workspace_id=workspace_id,
         index_path=index_path,
-        notebooklm_source_path=overview_path,
+        memory_overview_path=overview_path,
         block_paths=block_paths,
         written_files=tuple(written),
     )
@@ -1198,21 +1183,17 @@ def export_backend_to_obsidian(
     vault_dir: str | Path,
     workspace_id: str,
     project_title: str = "",
-    include_global: bool = False,
+    scope_chain: tuple[str, ...] = (),
 ) -> ObsidianExportResult:
     """Export blocks and backend graph edges from a durable Lethyx backend."""
 
     blocks = list(getattr(backend, "export_blocks")())
-    edges: list[MemoryEdgeRecord] = []
-    edges_for = getattr(backend, "edges_for", None)
-    if callable(edges_for):
-        for block in blocks:
-            edges.extend(edges_for(block.block_id) or [])
+    edges = list(getattr(backend, "export_edges")())
     return export_records_to_obsidian(
         blocks=blocks,
         edges=edges,
         vault_dir=vault_dir,
         workspace_id=workspace_id,
         project_title=project_title,
-        include_global=include_global,
+        scope_chain=scope_chain,
     )

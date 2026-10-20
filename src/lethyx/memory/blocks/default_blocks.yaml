@@ -1,111 +1,391 @@
-blocks:
-  - block_id: manager_core_directives
+﻿blocks:
+  - block_id: memory_root_index
+    block_type: memory_index
+    temperature: warm
+    scope: workspace
+    authority: advisory
+    delivery_policy: always_on
+    retention: durable
+    tags: [memory, index]
+    child_ids: [directive_memory_index, working_memory_index, durable_knowledge_index, semantic_memory_index, archive_memory_index]
+    index_only: true
+    token_budget: 0
+  - block_id: directive_memory_index
+    block_type: authority_index
+    temperature: warm
+    scope: workspace
+    authority: advisory
+    delivery_policy: on_demand
+    retention: durable
+    tags: [directive, policy, core]
+    guidance:
+      synopsis: Binding user and workspace instructions, policies, and constraints
+      use_when: [instruction, policy, constraint, required behavior]
+      avoid_when: [project fact, code or path lookup, current task state]
+    parent_id: memory_root_index
+    child_ids: [user_global_core_directives, workspace_core_directives]
+    index_only: true
+    token_budget: 0
+  - block_id: working_memory_index
+    block_type: working_set_index
+    temperature: hot
+    scope: session
+    authority: advisory
+    delivery_policy: working_set
+    retention: durable
+    tags: [task, phase, subtask, working_state]
+    guidance:
+      synopsis: Current task checkpoints and in-progress execution state
+      use_when: [current task, current phase, subtask, execution checkpoint]
+      avoid_when: [durable project fact, reusable lesson, archived idea]
+    parent_id: memory_root_index
+    child_ids: [task_state, execution_working_state]
+    index_only: true
+    token_budget: 0
+  - block_id: durable_knowledge_index
+    block_type: durable_knowledge_index
+    temperature: warm
+    scope: workspace
+    authority: advisory
+    delivery_policy: on_demand
+    retention: durable
+    tags: [lesson, report, skill, verified]
+    guidance:
+      synopsis: Verified reusable lessons, formal reports, and learned skills
+      use_when: [verified lesson, reusable procedure, formal report, learned skill]
+      avoid_when: [project-specific fact, code symbol, mutable project state]
+    parent_id: memory_root_index
+    child_ids: [verified_lessons, durable_reports, skills_index]
+    index_only: true
+    token_budget: 0
+  - block_id: semantic_memory_index
+    block_type: semantic_catalog_index
+    temperature: warm
+    scope: workspace
+    authority: advisory
+    delivery_policy: on_demand
+    retention: durable
+    tags: [semantic, state, episodic, resource, project]
+    guidance:
+      synopsis: Project facts, code and resources, mutable state, decisions, claims, and episodes
+      use_when: [project fact, exact path, code symbol, command, dependency, current project value, decision, artifact claim, workspace event]
+      avoid_when: [binding directive, current task checkpoint, unverified idea]
+    parent_id: memory_root_index
+    child_ids: [user_global_preferences, project_resources, code_resources, stable_project_facts, mutable_project_state, decisions_and_contracts, artifact_claims, workspace_episodes]
+    index_only: true
+    token_budget: 0
+  - block_id: archive_memory_index
+    block_type: archive_index
+    temperature: cold
+    scope: workspace
+    authority: advisory
+    delivery_policy: on_demand
+    retention: archive
+    tags: [archive, candidate, logs]
+    guidance:
+      synopsis: Unverified ideas, reflection candidates, and transient logs
+      use_when: [idea, hypothesis, reflection candidate, transient diagnostic log]
+      avoid_when: [verified fact, binding instruction, current task state]
+    parent_id: memory_root_index
+    child_ids: [project_ideas, reflection_candidates, transient_logs]
+    index_only: true
+    token_budget: 0
+  - block_id: user_global_core_directives
     block_type: core_directive
-    store: palace.charter
-    tier: always_on
-    scope: cross_run_durable
-    authority: directive_candidate
-    default_surface: directive
-    tags: [manager, core]
+    temperature: warm
+    scope: user_global
+    authority: directive
+    delivery_policy: always_on
+    retention: durable
+    tags: [user, global, core]
+    parent_id: directive_memory_index
+    producer: supervisor_tribunal
+    consumers: [directive_overlay]
+    recall_path: directive_overlay
+    lifecycle_policy: {initial_status: accepted, mutable: false, terminal_statuses: [retracted]}
+    isolation_policy: {dimension: user_global, cross_workspace: true}
     token_budget: 1200
   - block_id: workspace_core_directives
     block_type: workspace_directive
-    store: palace.lesson
-    tier: always_on
+    temperature: warm
     scope: workspace
-    authority: directive_candidate
-    default_surface: directive
+    authority: directive
+    delivery_policy: always_on
+    retention: durable
     tags: [workspace, bkb]
+    parent_id: directive_memory_index
+    producer: supervisor_tribunal
+    consumers: [directive_overlay]
+    recall_path: directive_overlay
+    lifecycle_policy: {initial_status: accepted, mutable: true, terminal_statuses: [superseded, retracted]}
+    isolation_policy: {dimension: workspace, cross_workspace: false}
     token_budget: 1000
-  - block_id: current_run_state
-    block_type: run_state
-    store: palace.run
-    tier: hot
-    scope: run_scoped
-    authority: current_state
-    default_surface: current_run_state
-    tags: [run_state]
-  - block_id: phase_scratchpad
-    block_type: scratchpad
-    store: palace.phase
-    tier: hot
-    scope: phase_scoped
-    authority: passive_evidence
-    default_surface: archive_hint
-    tags: [phase]
-  - block_id: subtask_scratchpad
-    block_type: scratchpad
-    store: palace.subtask
-    tier: hot
-    scope: subtask_scoped
-    authority: passive_evidence
-    default_surface: archive_hint
-    tags: [subtask]
+  - block_id: user_global_preferences
+    block_type: user_preference
+    temperature: warm
+    scope: user_global
+    authority: advisory
+    delivery_policy: on_demand
+    retention: durable
+    tags: [user, global, preference, profile]
+    semantic_memberships: [semantic]
+    parent_id: semantic_memory_index
+    producer: profile_import
+    consumers: [memory_agent, context_packer]
+    recall_path: hybrid_recall
+    lifecycle_policy: {initial_status: candidate, mutable: true, terminal_statuses: [superseded, retracted]}
+    isolation_policy: {dimension: user_global, cross_workspace: true}
+    retrieval_policy: {mode: hybrid, limit: 6, require_query_seed: true}
+    token_budget: 600
+  - block_id: task_state
+    block_type: typed_task_state
+    temperature: hot
+    scope: task
+    authority: advisory
+    delivery_policy: working_set
+    retention: session
+    tags: [task, state, checkpoint, structured_projection]
+    semantic_memberships: [state, working]
+    guidance:
+      synopsis: Typed current-task checkpoint projection
+      use_when: [task continuation, task constraints, checkpoint state]
+      avoid_when: [durable project facts, untyped scratchpad]
+    parent_id: working_memory_index
+    producer: host_observer
+    agent_writable: false
+    consumers: [continuation_runtime, context_packer]
+    recall_path: working_state
+    lifecycle_policy: {initial_status: candidate, mutable: true, terminal_statuses: [expired, retracted]}
+    isolation_policy: {dimension: task, cross_workspace: false}
+  - block_id: execution_working_state
+    block_type: execution_working_state
+    temperature: hot
+    scope: subtask
+    authority: advisory
+    delivery_policy: working_set
+    retention: session
+    tags: [phase, subtask, execution, working_state, scratchpad]
+    semantic_memberships: [state, working]
+    guidance:
+      synopsis: Scoped phase and subtask execution working state
+      use_when: [research finding, planning artifact, subtask card, execution artifact]
+      avoid_when: [typed task checkpoint, durable semantic truth]
+    parent_id: working_memory_index
+    producer: host_observer
+    consumers: [continuation_runtime, context_packer]
+    recall_path: working_state
+    lifecycle_policy: {initial_status: candidate, mutable: true, terminal_statuses: [expired, retracted]}
+    isolation_policy: {dimension: subtask, cross_workspace: false}
   - block_id: verified_lessons
     block_type: verified_lessons
-    store: palace.lesson
-    tier: warm
-    scope: cross_run_durable
-    authority: passive_evidence
-    default_surface: supplemental_evidence
+    temperature: warm
+    scope: workspace
+    authority: advisory
+    delivery_policy: on_demand
+    retention: durable
     tags: [lesson, verified]
+    semantic_memberships: [procedural, semantic]
+    parent_id: durable_knowledge_index
+    producer: verified_writer
+    consumers: [memory_agent, consolidation]
+    recall_path: hybrid_recall
+    lifecycle_policy: {initial_status: candidate, mutable: true, terminal_statuses: [superseded, deprecated, retracted]}
+    isolation_policy: {dimension: workspace, cross_workspace: false}
   - block_id: durable_reports
     block_type: durable_reports
-    store: palace.durable
-    tier: warm
-    scope: cross_run_durable
-    authority: passive_evidence
-    default_surface: supplemental_evidence
+    temperature: warm
+    scope: workspace
+    authority: advisory
+    delivery_policy: on_demand
+    retention: durable
     tags: [report]
-  - block_id: github_repo_capsules
-    block_type: external_project_index
-    store: palace.codeptr
-    tier: warm
-    scope: cross_run_durable
-    authority: passive_evidence
-    default_surface: supplemental_evidence
-    tags: [github_project, repo_capsule]
-    retrieval_policy: {mode: hybrid, n: 6, require_query_seed: true}
+    semantic_memberships: [semantic, reflection]
+    parent_id: durable_knowledge_index
+    producer: verified_writer
+    consumers: [memory_agent, evaluator]
+    recall_path: hybrid_recall
+    lifecycle_policy: {initial_status: candidate, mutable: true, terminal_statuses: [superseded, deprecated, retracted]}
+    isolation_policy: {dimension: workspace, cross_workspace: false}
+  - block_id: project_resources
+    block_type: resource
+    temperature: warm
+    scope: workspace
+    authority: advisory
+    delivery_policy: on_demand
+    retention: durable
+    tags: [project, repository, resource, repo_capsule]
+    semantic_memberships: [resource, semantic]
+    parent_id: semantic_memory_index
+    producer: canonical_writer
+    agent_writable: false
+    consumers: [memory_agent, local_reader]
+    recall_path: hybrid_recall
+    lifecycle_policy: {initial_status: candidate, mutable: true, terminal_statuses: [superseded, deprecated, retracted]}
+    isolation_policy: {dimension: workspace, cross_workspace: false}
+    retrieval_policy: {mode: hybrid, limit: 6, require_query_seed: true}
     promotion_policy: {target: bkb_candidate, requires: [typed_evidence, successful_reuse, tribunal_accept]}
-  - block_id: github_code_chunks
-    block_type: external_project_chunk
-    store: palace.codeptr
-    tier: cold
-    scope: cross_run_durable
-    authority: passive_evidence
-    default_surface: supplemental_evidence
-    tags: [github_project, code_chunk]
+  - block_id: code_resources
+    block_type: resource
+    temperature: cold
+    scope: workspace
+    authority: advisory
+    delivery_policy: on_demand
+    retention: durable
+    tags: [project, repository, code, symbol, resource, code_chunk]
+    semantic_memberships: [resource, project]
+    parent_id: semantic_memory_index
+    producer: canonical_writer
+    consumers: [memory_agent, local_reader]
+    recall_path: exact_lookup
+    lifecycle_policy: {initial_status: candidate, mutable: true, terminal_statuses: [superseded, deprecated, retracted]}
+    isolation_policy: {dimension: workspace, cross_workspace: false}
+  - block_id: stable_project_facts
+    block_type: stable_semantic_fact
+    temperature: warm
+    scope: workspace
+    authority: advisory
+    delivery_policy: on_demand
+    retention: durable
+    tags: [project, fact, repository, source, command, test, dependency, configuration]
+    semantic_memberships: [semantic, project]
+    guidance:
+      synopsis: Evidence-backed stable project facts
+      use_when: [stable repository fact, command, dependency, configuration]
+      avoid_when: [mutable status, decision, artifact claim]
+    parent_id: semantic_memory_index
+    producer: canonical_writer
+    consumers: [memory_agent, context_packer]
+    recall_path: hybrid_recall
+    lifecycle_policy: {initial_status: candidate, mutable: true, terminal_statuses: [superseded, deprecated, retracted]}
+    isolation_policy: {dimension: workspace, cross_workspace: false}
+    retrieval_policy: {mode: hybrid, limit: 8, require_query_seed: true}
+    token_budget: 800
+  - block_id: mutable_project_state
+    block_type: mutable_state
+    temperature: hot
+    scope: workspace
+    authority: advisory
+    delivery_policy: on_demand
+    retention: durable
+    tags: [project, mutable, state, status, configuration]
+    semantic_memberships: [state, semantic]
+    parent_id: semantic_memory_index
+    producer: canonical_writer
+    consumers: [memory_agent, context_packer]
+    recall_path: hybrid_recall
+    lifecycle_policy: {initial_status: candidate, mutable: true, terminal_statuses: [superseded, expired, retracted]}
+    isolation_policy: {dimension: workspace, cross_workspace: false}
+    retrieval_policy: {mode: hybrid, limit: 8, require_query_seed: true}
+    token_budget: 800
+  - block_id: decisions_and_contracts
+    block_type: decision_contract
+    temperature: warm
+    scope: workspace
+    authority: advisory
+    delivery_policy: on_demand
+    retention: durable
+    tags: [project, decision, contract, architecture]
+    semantic_memberships: [semantic, procedural]
+    parent_id: semantic_memory_index
+    producer: verified_writer
+    consumers: [memory_agent, tribunal]
+    recall_path: hybrid_recall
+    lifecycle_policy: {initial_status: candidate, mutable: true, terminal_statuses: [superseded, deprecated, retracted]}
+    isolation_policy: {dimension: workspace, cross_workspace: false}
+    retrieval_policy: {mode: hybrid, limit: 8, require_query_seed: true}
+    token_budget: 800
+  - block_id: artifact_claims
+    block_type: artifact_claim
+    temperature: warm
+    scope: workspace
+    authority: advisory
+    delivery_policy: on_demand
+    retention: durable
+    tags: [project, artifact, claim, build, test, release]
+    semantic_memberships: [semantic, resource]
+    parent_id: semantic_memory_index
+    producer: host_observer
+    consumers: [memory_agent, verifier]
+    recall_path: exact_lookup
+    lifecycle_policy: {initial_status: candidate, mutable: true, terminal_statuses: [superseded, expired, retracted]}
+    isolation_policy: {dimension: workspace, cross_workspace: false}
+    retrieval_policy: {mode: hybrid, limit: 8, require_query_seed: true}
+    token_budget: 800
   - block_id: skills_index
     block_type: skill_index
-    store: palace.skill_index
-    tier: warm
-    scope: cross_run_durable
-    authority: passive_evidence
-    default_surface: supplemental_evidence
-    tags: [skill]
-  - block_id: hindsight_candidates
-    block_type: reflection_queue
-    store: palace.idea
-    tier: warm
+    temperature: warm
     scope: workspace
-    authority: passive_evidence
-    default_surface: reflection_candidate
-    tags: [hindsight, candidate]
+    authority: advisory
+    delivery_policy: on_demand
+    retention: durable
+    tags: [skill]
+    semantic_memberships: [procedural, resource]
+    parent_id: durable_knowledge_index
+    producer: supervisor_tribunal
+    agent_writable: false
+    consumers: [memory_agent, local_reader]
+    recall_path: exact_lookup
+    lifecycle_policy: {initial_status: candidate, mutable: true, terminal_statuses: [superseded, deprecated, retracted]}
+    isolation_policy: {dimension: workspace, cross_workspace: false}
+  - block_id: project_ideas
+    block_type: idea_queue
+    temperature: cold
+    scope: workspace
+    authority: advisory
+    delivery_policy: reflection_only
+    retention: durable
+    tags: [idea, hypothesis, research_lead]
+    semantic_memberships: [reflection, semantic]
+    parent_id: archive_memory_index
+    producer: reflection_writer
+    consumers: [refiner, evaluator]
+    recall_path: reflection_queue
+    lifecycle_policy: {initial_status: candidate, mutable: true, terminal_statuses: [deprecated, retracted]}
+    isolation_policy: {dimension: workspace, cross_workspace: false}
+  - block_id: reflection_candidates
+    block_type: reflection_queue
+    temperature: warm
+    scope: workspace
+    authority: advisory
+    delivery_policy: reflection_only
+    retention: durable
+    tags: [reflection, candidate]
+    semantic_memberships: [reflection, semantic]
+    parent_id: archive_memory_index
+    producer: reflection_writer
+    consumers: [tribunal, refiner]
+    recall_path: reflection_queue
+    lifecycle_policy: {initial_status: candidate, mutable: true, terminal_statuses: [quarantined, retracted]}
+    isolation_policy: {dimension: workspace, cross_workspace: false}
   - block_id: transient_logs
     block_type: transient_logs
-    store: palace.transient
-    tier: transient
-    scope: transient
-    authority: archive
-    default_surface: archive_hint
+    temperature: cold
+    retention: ephemeral
+    scope: session
+    authority: advisory
+    delivery_policy: hidden
     tags: [logs]
-  - block_id: mnemosyne_workspace_episodic
-    block_type: external_backend_episodic
-    store: external.mnemosyne
-    tier: warm
+    semantic_memberships: [episodic, archive]
+    parent_id: archive_memory_index
+    producer: host_observer
+    consumers: [diagnostics]
+    recall_path: archive_only
+    lifecycle_policy: {initial_status: candidate, mutable: false, terminal_statuses: [expired, retracted]}
+    isolation_policy: {dimension: session, cross_workspace: false}
+  - block_id: workspace_episodes
+    block_type: episodic
+    temperature: warm
     scope: workspace
-    authority: passive_evidence
-    default_surface: supplemental_evidence
-    tags: [mnemosyne, episodic, workspace]
-    retrieval_policy: {mode: backend_recall, backend: mnemosyne, n: 8, require_query_seed: true}
+    authority: advisory
+    delivery_policy: on_demand
+    retention: durable
+    tags: [episodic, workspace, event, sequence]
+    semantic_memberships: [episodic, semantic]
+    parent_id: semantic_memory_index
+    producer: host_observer
+    consumers: [memory_agent, consolidation]
+    recall_path: hybrid_recall
+    lifecycle_policy: {initial_status: candidate, mutable: true, terminal_statuses: [superseded, expired, retracted]}
+    isolation_policy: {dimension: workspace, cross_workspace: false}
+    retrieval_policy: {mode: backend_recall, limit: 8, require_query_seed: true}
     promotion_policy: {target: bkb_candidate, requires: [canonical_evidence, tribunal_accept]}

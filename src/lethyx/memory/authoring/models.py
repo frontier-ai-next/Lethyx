@@ -3,6 +3,20 @@
 from dataclasses import dataclass, field
 from typing import Any
 
+from lethyx.contracts import TurnChildClaim
+from lethyx.contracts.memory import (
+    DeliveryPolicy,
+    MemoryAuthority,
+    MemoryRetention,
+    MemoryScope,
+    MemoryStatus,
+    MemoryTemperature,
+    PromotionDecision,
+    VerificationMethod,
+    VerificationStatus,
+)
+from lethyx.contracts.models import TrustLevel
+
 
 @dataclass(frozen=True)
 class MemoryWriteProposal:
@@ -12,13 +26,14 @@ class MemoryWriteProposal:
     tags: tuple[str, ...]
     workspace_id: str = ""
     run_id: str = ""
-    phase_id: str = ""
+    stage_id: str = ""
     subtask_id: str = ""
     source_id: str = ""
     evidence_kind: str = ""
     evidence_refs: tuple[dict[str, Any], ...] = ()
+    child_claims: tuple[TurnChildClaim, ...] = ()
+    write_mode: str = "standard"
     requested_block_id: str = ""
-    requested_store: str = ""
     metadata: dict[str, Any] = field(default_factory=dict)
 
 
@@ -27,12 +42,18 @@ class MemoryRouteDecision:
     accepted: bool
     reason: str
     block_id: str
-    store: str
-    tier: str
-    scope: str
-    surface: str
-    lifecycle: str
-    trust_level: str
-    verified: bool
+    retention: MemoryRetention
+    delivery_policy: DeliveryPolicy
+    temperature: MemoryTemperature
+    authority: MemoryAuthority
+    scope: MemoryScope
+    trust_level: TrustLevel
+    verification_status: VerificationStatus
+    verification_methods: tuple[VerificationMethod, ...]
+    promotion_decision: PromotionDecision
+    status: MemoryStatus
     tags: tuple[str, ...]
     policy_issues: tuple[str, ...] = ()
+    catalog_revision_id: str = ""
+    suggested_block_id: str = ""
+    suggested_action: str = ""

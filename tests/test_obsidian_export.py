@@ -2,7 +2,8 @@ from pathlib import Path
 
 from lethyx.contracts import EvidenceRef
 from lethyx.memory import cli
-from lethyx.memory.backends.contracts import MemoryBlockRecord, MemoryEdgeRecord
+from lethyx.contracts import MemoryBlockRecord
+from lethyx.memory.backends.contracts import MemoryEdgeRecord
 from lethyx.memory.obsidian_export import export_records_to_obsidian, note_name_for_block
 
 
@@ -12,30 +13,46 @@ def _block(
     *,
     title: str = "",
     workspace_id: str = "demo",
-    lifecycle: str = "active",
-    surface: str = "supplemental_evidence",
+    status: str = "accepted",
     trust_level: str = "workspace_verified",
-    privacy_class: str = "normal",
+    sensitivity: str = "internal",
+    content_mode: str = "full",
+    operational_risk: str = "low",
     tags: tuple[str, ...] = ("testing",),
     kind: str = "lesson",
+    scope: str = "workspace",
+    user_id: str = "",
 ) -> MemoryBlockRecord:
     return MemoryBlockRecord(
         block_id=block_id,
         title=title or block_id,
         content=content,
         kind=kind,
-        lifecycle=lifecycle,
+        status=status,
+        retention="durable",
+        delivery_policy="on_demand",
+        temperature="warm",
+        authority="advisory",
         trust_level=trust_level,
-        scope="workspace" if workspace_id else "manager",
-        surface=surface,
+        scope=scope,
+        verification_status="verified",
+        verification_methods=("test_run",),
+        promotion_decision="accepted",
         workspace_id=workspace_id,
+        user_id=user_id,
         source_backend="mempalace",
         tags=tags,
         evidence_refs=(
-            EvidenceRef(ref_type="test", ref_id=f"tests::{block_id}", produced_by="pytest"),
+            EvidenceRef(
+                ref_type="test_run",
+                ref_id=f"tests::{block_id}",
+                produced_by="verifier",
+                producer_id=f"verifier:{block_id}",
+            ),
         ),
-        privacy_class=privacy_class,
-        verified=True,
+        sensitivity=sensitivity,
+        content_mode=content_mode,
+        operational_risk=operational_risk,
     )
 
 
@@ -60,7 +77,7 @@ def test_obsidian_export_writes_project_index_notes_and_graph_links(tmp_path: Pa
 
     assert result.index_path == tmp_path / "Lethyx" / "Projects" / "demo" / "Index.md"
     assert result.index_path.exists()
-    assert result.notebooklm_source_path.exists()
+    assert result.memory_overview_path.exists()
 
     first_note = result.block_paths["mem-a"]
     second_note = result.block_paths["mem-b"]
@@ -71,7 +88,8 @@ def test_obsidian_export_writes_project_index_notes_and_graph_links(tmp_path: Pa
 
     first_text = first_note.read_text(encoding="utf-8")
     assert "workspace_id: demo" in first_text
-    assert "surface: supplemental_evidence" in first_text
+    assert "status: accepted" in first_text
+    assert "authority: advisory" in first_text
     assert "trust_level: workspace_verified" in first_text
     assert "Supports: [[Isolation Rule - mem-b]]" in first_text
     assert "Scoped recall supports isolation." in first_text
@@ -100,18 +118,24 @@ def test_obsidian_export_writes_project_index_notes_and_graph_links(tmp_path: Pa
         "[[Core/Project knowledge/Isolation Rule - mem-b|Isolation Rule - mem-b]]" in area_hub_text
     )
 
-    notebooklm_text = result.notebooklm_source_path.read_text(encoding="utf-8")
-    assert "# Demo Project memory overview" in notebooklm_text
-    assert "Use scoped recall for Project Alpha." in notebooklm_text
+    overview_text = result.memory_overview_path.read_text(encoding="utf-8")
+    assert "# Demo Project memory overview" in overview_text
+    assert "Use scoped recall for Project Alpha." in overview_text
 
 
 def test_obsidian_export_is_workspace_scoped_by_default(tmp_path: Path) -> None:
     demo = _block("demo-memory", "Demo workspace memory.", workspace_id="demo")
     other = _block("other-memory", "Other workspace memory.", workspace_id="other")
-    manager = _block("manager-memory", "Global manager memory.", workspace_id="")
+    global_memory = _block(
+        "global-memory",
+        "Global user memory.",
+        workspace_id="demo",
+        scope="user_global",
+        user_id="user-1",
+    )
 
     result = export_records_to_obsidian(
-        blocks=[demo, other, manager],
+        blocks=[demo, other, global_memory],
         edges=[],
         vault_dir=tmp_path,
         workspace_id="demo",
@@ -129,7 +153,7 @@ def test_obsidian_export_is_workspace_scoped_by_default(tmp_path: Path) -> None:
         / "demo-memory - demo-memory.md"
     ).read_text(encoding="utf-8")
     assert "Other workspace memory" not in text
-    assert "Global manager memory" not in text
+    assert "Global user memory" not in text
 
 
 def test_obsidian_export_keeps_session_evidence_out_of_core_memory_tree(tmp_path: Path) -> None:
@@ -139,7 +163,7 @@ def test_obsidian_export_keeps_session_evidence_out_of_core_memory_tree(tmp_path
         "Raw-ish session summary should remain recall evidence, not a top-level core memory note.",
         title="Session Summary",
         kind="session_summary",
-        tags=("session-migration", "tier:hot"),
+        tags=("session-summary",),
     )
 
     result = export_records_to_obsidian(
@@ -213,14 +237,14 @@ def test_obsidian_export_uses_universal_evidence_categories_without_ideas_parent
         "User asked the agent to recall prior project context.",
         title="User intent signal",
         kind="user_intent",
-        lifecycle="candidate",
+        status="candidate",
     )
     candidate = _block(
         "candidate_feature_note",
         "Potential project feature inferred from session evidence.",
         title="Candidate feature note",
         kind="hypothesis",
-        lifecycle="candidate",
+        status="candidate",
     )
 
     export_records_to_obsidian(
@@ -243,10 +267,10 @@ def test_obsidian_export_uses_universal_evidence_categories_without_ideas_parent
     assert not (root / "Evidence" / "Ideas").exists()
 
 
-def test_obsidian_export_removes_nested_project_obsidian_state(tmp_path: Path) -> None:
-    stale = tmp_path / "Lethyx" / "Projects" / "demo" / ".obsidian" / "workspace.json"
-    stale.parent.mkdir(parents=True, exist_ok=True)
-    stale.write_text("{}", encoding="utf-8")
+def test_obsidian_export_does_not_mutate_unowned_project_state(tmp_path: Path) -> None:
+    unowned = tmp_path / "Lethyx" / "Projects" / "demo" / ".obsidian" / "workspace.json"
+    unowned.parent.mkdir(parents=True, exist_ok=True)
+    unowned.write_text("{}", encoding="utf-8")
 
     export_records_to_obsidian(
         blocks=[_block("core-rule", "Core memory only.", title="Core Rule")],
@@ -255,38 +279,43 @@ def test_obsidian_export_removes_nested_project_obsidian_state(tmp_path: Path) -
         workspace_id="demo",
     )
 
-    assert not (tmp_path / "Lethyx" / "Projects" / "demo" / ".obsidian").exists()
+    assert unowned.read_text(encoding="utf-8") == "{}"
 
 
-def test_obsidian_export_can_include_global_blocks_explicitly(tmp_path: Path) -> None:
+def test_obsidian_export_can_include_user_global_scope_explicitly(tmp_path: Path) -> None:
     demo = _block("demo-memory", "Demo workspace memory.", workspace_id="demo")
-    manager = _block("manager-memory", "Global manager memory.", workspace_id="")
+    global_memory = _block(
+        "global-memory",
+        "Global user memory.",
+        workspace_id="demo",
+        scope="user_global",
+        user_id="user-1",
+    )
 
     result = export_records_to_obsidian(
-        blocks=[demo, manager],
+        blocks=[demo, global_memory],
         edges=[],
         vault_dir=tmp_path,
         workspace_id="demo",
-        include_global=True,
+        scope_chain=("workspace:demo", "user_global:user-1"),
     )
 
-    assert set(result.block_paths) == {"demo-memory", "manager-memory"}
-    assert "Global manager memory." in result.block_paths["manager-memory"].read_text(
-        encoding="utf-8"
-    )
+    assert set(result.block_paths) == {"demo-memory", "global-memory"}
+    assert "Global user memory." in result.block_paths["global-memory"].read_text(encoding="utf-8")
 
 
-def test_obsidian_export_excludes_non_exportable_privacy_classes(tmp_path: Path) -> None:
+def test_obsidian_export_excludes_protected_canonical_safety_records(tmp_path: Path) -> None:
     public = _block("public-memory", "Public memory can be exported.")
     secret = _block(
         "secret-memory",
         "Secret pointer must not leave local storage.",
-        privacy_class="secret_pointer",
+        sensitivity="secret",
+        content_mode="pointer_only",
     )
     local_only = _block(
         "local-only-memory",
         "Non-injectable memory must stay out of the bundle.",
-        privacy_class="non-injectable",
+        content_mode="non_injectable",
     )
 
     result = export_records_to_obsidian(
@@ -297,7 +326,7 @@ def test_obsidian_export_excludes_non_exportable_privacy_classes(tmp_path: Path)
     )
 
     assert set(result.block_paths) == {"public-memory"}
-    bundle = result.notebooklm_source_path.read_text(encoding="utf-8")
+    bundle = result.memory_overview_path.read_text(encoding="utf-8")
     assert "Public memory can be exported." in bundle
     assert "Secret pointer must not leave local storage." not in bundle
     assert "Non-injectable memory must stay out of the bundle." not in bundle
@@ -319,8 +348,7 @@ def test_cli_obsidian_export_writes_vault_from_selected_backend(
         def export_blocks(self) -> list[MemoryBlockRecord]:
             return [self.block]
 
-        def edges_for(self, block_id: str) -> list[MemoryEdgeRecord]:
-            assert block_id == "cli-memory"
+        def export_edges(self) -> list[MemoryEdgeRecord]:
             return []
 
     def fake_create_backend(

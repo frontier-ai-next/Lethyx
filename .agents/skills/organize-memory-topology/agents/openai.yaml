@@ -1,0 +1,4 @@
+interface:
+  display_name: "Organize Memory Topology"
+  short_description: "Evolve long-term memory by meaning"
+  default_prompt: "Use $organize-memory-topology to evolve the current long-term memory tree and active context."

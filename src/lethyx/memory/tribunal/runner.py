@@ -4,7 +4,6 @@ from lethyx.memory.tribunal.checks import (
     contradiction_check,
     evidence_check,
     lifecycle_check,
-    safety_prompt_check,
     scope_check,
     trust_check,
     utility_check,
@@ -20,7 +19,6 @@ def run_tribunal(inp: TribunalInput) -> TribunalDecision:
         lifecycle_check(inp),
         contradiction_check(inp),
         utility_check(inp),
-        safety_prompt_check(inp),
     )
     quarantine = [c for c in checks if not c.passed and c.severity == "quarantine"]
     blocking = [c for c in checks if not c.passed and c.severity in {"blocking", "error"}]
