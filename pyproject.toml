@@ -4,11 +4,13 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "lethyx"
-version = "0.1.0"
+version = "0.6.0"
 description = "Framework-neutral memory layer for agent systems."
 requires-python = ">=3.12"
 readme = "README.md"
+license = "MIT"
 dependencies = [
+    "filelock>=3.29.4",
     "pydantic>=2.13.4",
     "pydantic-settings>=2.14.2",
     "pyyaml>=6.0.3",
@@ -18,22 +20,44 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-dev = ["pytest>=9.1.1", "ruff>=0.15.19"]
+dev = [
+    "build>=1.3.0",
+    "coverage[toml]>=7.13.0",
+    "mypy>=1.20,<2",
+    "pre-commit>=4.5.0",
+    "pytest>=9.1.1",
+    "ruff>=0.15.19",
+    "tox>=4.32.0",
+    "types-PyYAML>=6.0.12,<7",
+    "tomlkit>=0.13,<1",
+]
 hindsight = ["hindsight-client>=0.8.3,<0.9"]
-hindsight-local = ["hindsight-all>=0.8.3,<0.9"]
-bridge = ["fastapi>=0.138.0", "uvicorn[standard]>=0.46.0"]
+hindsight-local = ["hindsight-all>=0.8.3,<0.9", "litellm==1.90.0"]
+zvec = ["zvec>=0.7,<0.8"]
 openai = ["openai>=2.43.0"]
-mcp = ["mcp>=1.20.0"]
-langgraph = ["langgraph>=1.2.6"]
+mcp = ["mcp>=1.20.0,<2", "ruamel.yaml>=0.18,<1", "tomlkit>=0.13,<1"]
+docs = ["mkdocs-material>=9,<10"]
 
 [project.scripts]
 lethyx = "lethyx.memory.cli:main"
 lethyx-mcp = "lethyx.memory.mcp_server:main"
-lethyx-scenarios = "lethyx.evals.memory_scenarios.cli:main"
+lethyx-codex-hook = "lethyx.integrations.codex_hooks:main"
+lethyx-claude-hook = "lethyx.integrations.claude_hooks:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]
 include = ["lethyx*"]
+
+[tool.setuptools.package-data]
+"lethyx.memory.blocks" = ["*.yaml"]
+
+[tool.coverage.run]
+branch = true
+source = ["src/lethyx"]
+
+[tool.coverage.report]
+show_missing = true
+skip_covered = false
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
@@ -53,11 +77,13 @@ force-exclude = true
 extend-exclude = [
     ".external",
     ".hermes",
-    ".memory_bench_cache",
-    ".mrt",
     ".pytest_cache",
     ".ruff_cache",
     "build",
     "dist",
-    "runs",
 ]
+
+[tool.mypy]
+python_version = "3.12"
+files = ["src/lethyx"]
+warn_unused_configs = true

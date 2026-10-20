@@ -3,6 +3,8 @@
 from dataclasses import dataclass, field
 from typing import Any, Literal
 
+from lethyx.memory.backends.contracts import MemoryEdgeRecord
+
 Decision = Literal["accept", "reject", "quarantine", "needs_more_evidence"]
 
 
@@ -15,7 +17,7 @@ class TribunalInput:
     source_backend: str = ""
     workspace_id: str = ""
     target_workspace_id: str = ""
-    drive_root: str = ""
+    graph_edges: tuple[MemoryEdgeRecord, ...] = ()
     utility_value: float | None = None
 
 

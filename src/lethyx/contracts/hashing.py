@@ -2,6 +2,7 @@
 
 import hashlib
 import json
+import os
 from pathlib import Path
 from typing import Any, Iterable
 
@@ -46,13 +47,11 @@ def file_sha256(path: str | Path) -> str:
 
 
 def _iter_hashable_files(root: Path) -> Iterable[Path]:
-    for path in sorted(root.rglob("*")):
-        try:
-            rel_parts = path.relative_to(root).parts
-        except ValueError:
-            continue
-        if any(part in SKIP_DIRS for part in rel_parts):
-            continue
+    paths: list[Path] = []
+    for directory, directories, files in os.walk(root, topdown=True):
+        directories[:] = [name for name in directories if name not in SKIP_DIRS]
+        paths.extend(Path(directory) / name for name in files if name not in SKIP_DIRS)
+    for path in sorted(paths):
         if path.is_file():
             yield path
 

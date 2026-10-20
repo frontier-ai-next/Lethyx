@@ -1,17 +1,7 @@
 """Deterministic tribunal checks."""
 
-from pathlib import Path
-
-from lethyx.memory.graph.scoring import proof_score
+from lethyx.memory.edge_graph import score_memory_edges
 from lethyx.memory.tribunal.models import TribunalCheckResult, TribunalInput
-
-_PROMPT_INJECTION_MARKERS = (
-    "ignore previous instructions",
-    "bypass verification",
-    "disable tests",
-    "skip evidence",
-    "do not tell the user",
-)
 
 
 def evidence_check(inp: TribunalInput) -> TribunalCheckResult:
@@ -57,9 +47,9 @@ def lifecycle_check(inp: TribunalInput) -> TribunalCheckResult:
 
 
 def contradiction_check(inp: TribunalInput) -> TribunalCheckResult:
-    if not inp.drive_root:
+    if not inp.graph_edges:
         return TribunalCheckResult("ContradictionCheck", True, "info", "graph_unavailable")
-    score = proof_score(inp.candidate_id, Path(inp.drive_root))
+    score = score_memory_edges(inp.candidate_id, inp.graph_edges)
     if score.hard_contradiction:
         return TribunalCheckResult(
             "ContradictionCheck",
@@ -77,19 +67,3 @@ def utility_check(inp: TribunalInput) -> TribunalCheckResult:
     if inp.utility_value is not None and inp.utility_value < -0.5:
         return TribunalCheckResult("UtilityCheck", True, "warning", "low_utility_warning_only")
     return TribunalCheckResult("UtilityCheck", True, "info", "utility_ok")
-
-
-def safety_prompt_check(inp: TribunalInput) -> TribunalCheckResult:
-    text = "\n".join(
-        str(rule.get("title") or "") + "\n" + str(rule.get("rule") or "") for rule in inp.rules
-    ).lower()
-    for marker in _PROMPT_INJECTION_MARKERS:
-        if marker in text:
-            return TribunalCheckResult(
-                "SafetyPromptCheck",
-                False,
-                "quarantine",
-                "prompt_injection_like_candidate",
-                {"marker": marker},
-            )
-    return TribunalCheckResult("SafetyPromptCheck", True, "info", "prompt_safety_ok")

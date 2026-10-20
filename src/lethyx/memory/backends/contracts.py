@@ -8,117 +8,84 @@ backend-owned sidecar, but runtime authority is carried by these typed fields.
 import json
 import time
 import uuid
-from dataclasses import asdict, dataclass, field, replace
-from typing import Any, Literal
+from dataclasses import asdict, dataclass, field, fields, replace
+from typing import Any, cast, get_args
 
-from lethyx.contracts import EvidenceRef
-from lethyx.memory.backends.base import DurableEvent, DurableLesson, MemoryHit
+from lethyx.contracts import (
+    BackendId,
+    EvidenceRef,
+    MemoryBlockRecord,
+    RecordBlockMembership,
+    json_ready,
+)
+from lethyx.contracts.memory import (
+    CURRENT_SCHEMA_VERSION,
+    MemoryStatus,
+    MemoryAuthority,
+    MemoryRetention,
+    DeliveryPolicy,
+    _closed_value,
+    validate_memory_safety_axes,
+    compact_turn_child_claims,
+)
+from lethyx.memory.backends.base import MemoryHit
 
-BackendId = Literal["mempalace", "hindsight", "mnemosyne", "composite"]
-Lifecycle = Literal[
-    "candidate",
-    "active",
-    "quarantined",
-    "superseded",
-    "deprecated",
-    "retracted",
-    "archived",
-]
-MemorySurface = Literal[
-    "directive",
-    "current_run_state",
-    "supplemental_evidence",
-    "archive_hint",
-    "reflection_candidate",
-]
-MemoryScope = Literal[
-    "manager",
-    "workspace",
-    "cross_run_durable",
-    "run_scoped",
-    "phase_scoped",
-    "subtask_scoped",
-    "transient",
-]
-MemoryTier = Literal["always_on", "hot", "warm", "cold", "transient"]
-
-_ALLOWED_BACKENDS = {"mempalace", "hindsight", "mnemosyne", "composite"}
-_ALLOWED_LIFECYCLES = {
-    "candidate",
-    "active",
-    "quarantined",
-    "superseded",
-    "deprecated",
-    "retracted",
-    "archived",
-}
-_ALLOWED_SURFACES = {
-    "directive",
-    "current_run_state",
-    "supplemental_evidence",
-    "archive_hint",
-    "reflection_candidate",
-}
-_ALLOWED_SCOPES = {
-    "manager",
-    "workspace",
-    "cross_run_durable",
-    "run_scoped",
-    "phase_scoped",
-    "subtask_scoped",
-    "transient",
-}
-_ALLOWED_TIERS = {"always_on", "hot", "warm", "cold", "transient"}
-_VERIFIED_TRUST = {
-    "workspace_verified",
-    "public_verified",
-    "supervisor_verified",
-    "mutation_verified",
-    "hidden_verified",
-    "adversarial_verified",
-    "human_approved",
-}
-_DURABLE_KINDS = {"durable", "verification_report", "lesson", "bkb_rule"}
-_NON_DIRECTIVE_LIFECYCLES = {
-    "candidate",
-    "quarantined",
-    "superseded",
-    "deprecated",
-    "retracted",
-    "archived",
-}
-_AUTHORITY_CHANGING_LIFECYCLES = {"active", "superseded", "deprecated", "retracted"}
+_ALLOWED_BACKENDS = frozenset(get_args(BackendId))
+_AUTHORITY_CHANGING_STATUSES = frozenset({"accepted", "superseded", "deprecated", "retracted"})
+_CANONICAL_RECORD_FIELDS = frozenset(MemoryBlockRecord.__dataclass_fields__)
 
 
 class EdgeType:
+    CONTAINS = "contains"
     DERIVED_FROM = "derived_from"
     CITES = "cites"
     TESTS = "tests"
     IMPLEMENTS = "implements"
     SUPERSEDES = "supersedes"
+    SUPPORTS = "supports"
+    VERIFIED_BY = "verified_by"
+    VERIFIES = "verifies"
+    REFUTES = "refutes"
+    REVISES = "revises"
+    CONTRADICTS = "contradicts"
+    OBSERVED_IN = "observed_in"
+    PRODUCED_BY = "produced_by"
+    PRODUCED_IN = "produced_in"
+    RELATED_TO = "related_to"
     REFERENCES_FILE = "references_file"
-    FROM_PHASE = "from_phase"
     FROM_SUBTASK = "from_subtask"
     TRIGGERED_BY_ERROR = "triggered_by_error"
     FLAGGED_BY = "flagged_by"
     BLOCKS = "blocks"
     APPLIED_REFLECTION = "applied_reflection"
+    MENTIONS_SYMBOL = "mentions_symbol"
 
 
 ALLOWED_EDGE_TYPES: frozenset[str] = frozenset(
     {
+        EdgeType.CONTAINS,
         EdgeType.DERIVED_FROM,
         EdgeType.CITES,
         EdgeType.TESTS,
         EdgeType.IMPLEMENTS,
         EdgeType.SUPERSEDES,
+        EdgeType.SUPPORTS,
+        EdgeType.VERIFIED_BY,
+        EdgeType.VERIFIES,
+        EdgeType.REFUTES,
+        EdgeType.REVISES,
+        EdgeType.CONTRADICTS,
+        EdgeType.OBSERVED_IN,
+        EdgeType.PRODUCED_BY,
+        EdgeType.PRODUCED_IN,
+        EdgeType.RELATED_TO,
         EdgeType.REFERENCES_FILE,
-        EdgeType.FROM_PHASE,
         EdgeType.FROM_SUBTASK,
         EdgeType.TRIGGERED_BY_ERROR,
         EdgeType.FLAGGED_BY,
         EdgeType.BLOCKS,
         EdgeType.APPLIED_REFLECTION,
+        EdgeType.MENTIONS_SYMBOL,
     }
 )
 
@@ -132,7 +99,7 @@ def _evidence_from_any(value: Any) -> EvidenceRef:
         return value
     if isinstance(value, dict):
         return EvidenceRef.from_mapping(value)
-    return EvidenceRef(ref_type="unknown", ref_id=str(value), produced_by="unknown")
+    raise ValueError("evidence_refs must contain typed EvidenceRef values")
 
 
 def _evidence_tuple(values: Any) -> tuple[EvidenceRef, ...]:
@@ -147,72 +114,210 @@ def evidence_to_json(refs: tuple[EvidenceRef, ...] | list[EvidenceRef]) -> str:
 
 @dataclass(frozen=True)
 class BackendCapabilities:
+    """Effective operations of the selected backend, including its owned indexes.
+
+    Recovery of one revision is distinct from atomic visibility of a whole batch.
+    Cancellation means an interruptible backend operation, not a caller timeout.
+    """
+
     backend_id: BackendId
-    persistent: bool
-    semantic_recall: bool = True
-    fts_recall: bool = True
-    graph_edges: bool = True
-    lifecycle_mutation: bool = True
-    reflection_candidates: bool = True
-    workspace_isolation: bool = True
-    run_phase_subtask_isolation: bool = True
-    value_tracking: bool = True
-    export_import: bool = True
+    persistent: bool = False
+    semantic_recall: bool = False
+    fts_recall: bool = False
+    graph_edges: bool = False
+    lifecycle_mutation: bool = False
+    workspace_isolation: bool = False
+    run_subtask_isolation: bool = False
+    value_tracking: bool = False
+    export_import: bool = False
+    exact_record_read: bool = False
+    scoped_search: bool = False
+    revision_history: bool = False
+    revision_compare_and_swap: bool = False
+    recoverable_writes: bool = False
+    atomic_record_reassignment: bool = False
+    staged_topology_evolution: bool = False
+    atomic_batch_publication: bool = False
+    batch_read: bool = False
+    cancellation: bool = False
     requires_external_service: bool = False
     supports_embedded: bool = False
 
     def __post_init__(self) -> None:
         if self.backend_id not in _ALLOWED_BACKENDS:
             raise ValueError(f"backend_id must be one of {sorted(_ALLOWED_BACKENDS)}")
+        for descriptor in fields(self):
+            if descriptor.name != "backend_id" and type(getattr(self, descriptor.name)) is not bool:
+                raise ValueError(f"backend capability {descriptor.name} must be a boolean")
+
+    @classmethod
+    def _feature_names(cls) -> frozenset[str]:
+        return frozenset(field.name for field in fields(cls)) - {
+            "backend_id",
+            "requires_external_service",
+            "supports_embedded",
+        }
+
+    @property
+    def enabled_features(self) -> tuple[str, ...]:
+        return tuple(sorted(name for name in self._feature_names() if getattr(self, name)))
+
+    @classmethod
+    def effective(
+        cls,
+        backend_id: BackendId,
+        *,
+        native_ok: bool,
+        implemented: frozenset[str],
+        requires_external_service: bool = False,
+        supports_embedded: bool = False,
+    ) -> "BackendCapabilities":
+        if type(native_ok) is not bool:
+            raise ValueError("backend native readiness must be a boolean")
+        feature_names = cls._feature_names()
+        unknown = implemented - feature_names
+        if unknown:
+            raise ValueError(f"unknown backend capabilities: {sorted(unknown)}")
+        values = {name: bool(native_ok and name in implemented) for name in feature_names}
+        return cls(
+            backend_id=backend_id,
+            **values,
+            requires_external_service=bool(native_ok and requires_external_service),
+            supports_embedded=bool(native_ok and supports_embedded),
+        )
 
 
 @dataclass(frozen=True)
-class MemoryBlockRecord:
-    block_id: str
-    content: str
-    title: str = ""
-    kind: str = "observation"
-    lifecycle: str = "candidate"
-    trust_level: str = "agent_claim"
-    scope: str = "run_scoped"
-    tier: str = "warm"
-    surface: str = "supplemental_evidence"
+class NativePartitionIdentity:
+    backend_id: BackendId
+    workspace_id: str
+    primary_block_id: str
+    catalog_revision_id: str = field(compare=False)
+    partition_id: str
+    isolation_class: str
+    partition_mode: str
+
+    def __post_init__(self) -> None:
+        if self.backend_id not in _ALLOWED_BACKENDS:
+            raise ValueError(f"backend_id must be one of {sorted(_ALLOWED_BACKENDS)}")
+        for field_name in (
+            "workspace_id",
+            "primary_block_id",
+            "catalog_revision_id",
+            "partition_id",
+            "partition_mode",
+        ):
+            if not str(getattr(self, field_name) or "").strip():
+                raise ValueError(f"native partition {field_name} is required")
+        if self.isolation_class not in {"physical", "native_tag"}:
+            raise ValueError("native partition isolation_class is unsupported")
+
+    @property
+    def collection_prefix(self) -> str:
+        if self.backend_id != "mempalace":
+            raise ValueError("collection_prefix is only defined for MemPalace partitions")
+        digest = self.partition_id.rsplit(":", 1)[-1]
+        if len(digest) != 64 or any(character not in "0123456789abcdef" for character in digest):
+            raise ValueError("MemPalace partition id must end in a SHA-256 digest")
+        return f"ummem_{digest}"
+
+    def to_mapping(self) -> dict[str, str]:
+        return {
+            "backend_id": self.backend_id,
+            "workspace_id": self.workspace_id,
+            "primary_block_id": self.primary_block_id,
+            "catalog_revision_id": self.catalog_revision_id,
+            "partition_id": self.partition_id,
+            "isolation_class": self.isolation_class,
+            "partition_mode": self.partition_mode,
+        }
+
+
+@dataclass(frozen=True)
+class NativePartitionMetrics:
+    identity: NativePartitionIdentity
+    record_count: int = 0
+    write_count: int = 0
+    recall_count: int = 0
+    hit_count: int = 0
+    zero_hit_count: int = 0
+    failure_count: int = 0
+    record_bytes: int | None = None
+    latency_p50_ms: float = 0.0
+    latency_p95_ms: float = 0.0
+    rendered_tokens: int = 0
+    consolidation_count: int = 0
+    compaction_count: int = 0
+    eviction_count: int = 0
+    expiry_count: int = 0
+    scoped_recall_count: int = 0
+    broad_recall_count: int = 0
+    last_accessed_at: str = ""
+    health: str = "unknown"
+
+    def __post_init__(self) -> None:
+        integer_fields = (
+            "record_count",
+            "write_count",
+            "recall_count",
+            "hit_count",
+            "zero_hit_count",
+            "failure_count",
+            "rendered_tokens",
+            "consolidation_count",
+            "compaction_count",
+            "eviction_count",
+            "expiry_count",
+            "scoped_recall_count",
+            "broad_recall_count",
+        )
+        if any(int(getattr(self, field_name)) < 0 for field_name in integer_fields):
+            raise ValueError("native partition metric counters cannot be negative")
+        if self.record_bytes is not None and self.record_bytes < 0:
+            raise ValueError("native partition record_bytes cannot be negative")
+        if self.latency_p50_ms < 0 or self.latency_p95_ms < 0:
+            raise ValueError("native partition latency cannot be negative")
+
+    def to_mapping(self) -> dict[str, Any]:
+        return {
+            **self.identity.to_mapping(),
+            "record_count": self.record_count,
+            "write_count": self.write_count,
+            "recall_count": self.recall_count,
+            "hit_count": self.hit_count,
+            "zero_hit_count": self.zero_hit_count,
+            "failure_count": self.failure_count,
+            "record_bytes": self.record_bytes,
+            "latency_p50_ms": self.latency_p50_ms,
+            "latency_p95_ms": self.latency_p95_ms,
+            "rendered_tokens": self.rendered_tokens,
+            "consolidation_count": self.consolidation_count,
+            "compaction_count": self.compaction_count,
+            "eviction_count": self.eviction_count,
+            "expiry_count": self.expiry_count,
+            "scoped_recall_count": self.scoped_recall_count,
+            "broad_recall_count": self.broad_recall_count,
+            "last_accessed_at": self.last_accessed_at,
+            "health": self.health,
+        }
+
+
+@dataclass(frozen=True)
+class MemoryIndexNode:
+    node_id: str
+    title: str
+    node_type: str
     workspace_id: str = ""
-    run_id: str = ""
-    phase_id: str = ""
-    subtask_id: str = ""
-    producer: str = "agent"
-    source_backend: str = ""
     tags: tuple[str, ...] = ()
-    evidence_refs: tuple[EvidenceRef, ...] = ()
-    external_refs: dict[str, str] = field(default_factory=dict)
-    privacy_class: str = "normal"
-    risk_level: str = "normal"
-    mutation_of: str = ""
-    supersedes: tuple[str, ...] = ()
-    superseded_by: str = ""
-    expires_at: str = ""
-    token_budget: int = 0
     metadata: dict[str, Any] = field(default_factory=dict)
-    verified: bool = False
     created_at: str = ""
     updated_at: str = ""
 
     def __post_init__(self) -> None:
-        if not self.block_id:
-            object.__setattr__(self, "block_id", f"mem_{uuid.uuid4().hex[:16]}")
-        if self.lifecycle not in _ALLOWED_LIFECYCLES:
-            object.__setattr__(self, "lifecycle", "candidate")
-        if self.surface not in _ALLOWED_SURFACES:
-            object.__setattr__(self, "surface", "supplemental_evidence")
-        if self.scope not in _ALLOWED_SCOPES:
-            object.__setattr__(self, "scope", "run_scoped")
-        if self.tier not in _ALLOWED_TIERS:
-            object.__setattr__(self, "tier", "warm")
+        if not self.node_id:
+            object.__setattr__(self, "node_id", f"idx_{uuid.uuid4().hex[:16]}")
         if not isinstance(self.tags, tuple):
             object.__setattr__(self, "tags", tuple(str(tag) for tag in self.tags))
-        if not isinstance(self.evidence_refs, tuple):
-            object.__setattr__(self, "evidence_refs", _evidence_tuple(self.evidence_refs))
         now = _now()
         if not self.created_at:
             object.__setattr__(self, "created_at", now)
@@ -227,7 +332,6 @@ class MemoryEdgeRecord:
     edge_type: str
     workspace_id: str = ""
     run_id: str = ""
-    phase_id: str = ""
     subtask_id: str = ""
     reason: str = ""
     weight: float = 1.0
@@ -238,8 +342,22 @@ class MemoryEdgeRecord:
     def __post_init__(self) -> None:
         if not self.created_at:
             object.__setattr__(self, "created_at", _now())
-        if not isinstance(self.evidence_refs, tuple):
-            object.__setattr__(self, "evidence_refs", _evidence_tuple(self.evidence_refs))
+        object.__setattr__(self, "evidence_refs", _evidence_tuple(self.evidence_refs))
+
+
+class CanonicalHeadConflict(RuntimeError):
+    """Raised when a canonical successor does not match the committed head."""
+
+
+@dataclass(frozen=True)
+class CanonicalHeadReservation:
+    commit_revision: int
+    workspace_id: str
+    canonical_key_sha256: str
+    predecessor_id: str
+    successor_id: str
+    successor_status: str
+    successor_authority: str
 
 
 @dataclass(frozen=True)
@@ -247,7 +365,6 @@ class MemoryUsageRecord:
     block_id: str
     workspace_id: str = ""
     run_id: str = ""
-    phase_id: str = ""
     subtask_id: str = ""
     included: bool = False
     skipped: bool = False
@@ -266,83 +383,46 @@ class MemoryUsageRecord:
             object.__setattr__(self, "evidence_refs", _evidence_tuple(self.evidence_refs))
 
 
-def validate_block_record(record: MemoryBlockRecord) -> MemoryBlockRecord:
-    issues: list[str] = []
-    if record.surface == "directive" and record.lifecycle in _NON_DIRECTIVE_LIFECYCLES:
-        issues.append("candidate/quarantined memory cannot use directive surface")
-    durable_like = record.kind in _DURABLE_KINDS or record.scope == "cross_run_durable"
-    if durable_like and record.trust_level not in _VERIFIED_TRUST:
-        issues.append("durable or cross-run memory requires verified trust")
-    if durable_like and not record.evidence_refs:
-        issues.append("durable memory requires typed evidence_refs")
-    if record.surface == "directive" and record.trust_level not in _VERIFIED_TRUST:
-        issues.append("directive memory requires verified trust")
-    if record.surface == "directive" and record.metadata.get("promotion_gate") not in {
-        "tribunal_accept",
-        "human_approved",
-        "bootstrap_curated",
-    }:
-        issues.append("directive memory requires accepted promotion gate")
-    if issues:
-        raise ValueError("; ".join(issues))
-    return record
-
-
-def durable_palace_write_issues(
-    *,
-    verified: bool,
-    trust_level: str,
-    evidence_refs_json: str,
-) -> list[str]:
-    """Gate for direct MemPalace writes/promotions into durable scope.
-
-    Mirrors :func:`validate_block_record` semantics for callers that bypass the
-    backend ``retain_block`` path: durable nodes require ``verified=True``,
-    verified-or-higher trust, and at least one typed evidence ref.
-    """
-    issues: list[str] = []
-    if not verified:
-        issues.append("durable palace writes require verified=True")
-    if str(trust_level or "").strip().lower() not in _VERIFIED_TRUST:
-        issues.append("durable or cross-run palace writes require verified trust_level")
-    refs: list[dict[str, Any]] = []
-    raw = str(evidence_refs_json or "").strip()
-    if raw:
-        try:
-            parsed = json.loads(raw)
-        except json.JSONDecodeError:
-            parsed = None
-        if isinstance(parsed, list):
-            refs = [
-                item
-                for item in parsed
-                if isinstance(item, dict) and str(item.get("ref_id") or "").strip()
-            ]
-    if not refs:
-        issues.append("durable palace writes require typed evidence_refs")
-    return issues
-
-
-def validate_lifecycle_transition(
+def validate_status_transition(
     current: MemoryBlockRecord,
-    lifecycle: str,
+    status: str,
     *,
     reason: str = "",
     evidence_refs: list[EvidenceRef] | tuple[EvidenceRef, ...] | None = None,
-    surface: str | None = None,
+    authority: str | None = None,
+    retention: str | None = None,
+    delivery_policy: str | None = None,
 ) -> None:
-    if lifecycle not in _ALLOWED_LIFECYCLES:
-        raise ValueError(f"unknown lifecycle: {lifecycle}")
+    if status not in get_args(MemoryStatus):
+        raise ValueError(f"unknown status: {status}")
     refs = tuple(evidence_refs or ())
-    target_surface = surface or current.surface
-    if target_surface == "directive" and (
-        lifecycle in _NON_DIRECTIVE_LIFECYCLES or current.trust_level not in _VERIFIED_TRUST
-    ):
-        raise ValueError("directive lifecycle transition requires verified active memory")
-    if lifecycle in _AUTHORITY_CHANGING_LIFECYCLES and not reason:
-        raise ValueError("authority-changing lifecycle mutation requires reason")
-    if lifecycle in {"active", "retracted"} and not (refs or current.evidence_refs):
-        raise ValueError("authority-changing lifecycle mutation requires evidence_refs")
+    if status in _AUTHORITY_CHANGING_STATUSES and not reason:
+        raise ValueError("authority-changing status mutation requires reason")
+    replace(
+        current,
+        status=cast(MemoryStatus, _closed_value(status, field_name="status", shape=MemoryStatus)),
+        authority=cast(
+            MemoryAuthority,
+            _closed_value(
+                authority or current.authority, field_name="authority", shape=MemoryAuthority
+            ),
+        ),
+        retention=cast(
+            MemoryRetention,
+            _closed_value(
+                retention or current.retention, field_name="retention", shape=MemoryRetention
+            ),
+        ),
+        delivery_policy=cast(
+            DeliveryPolicy,
+            _closed_value(
+                delivery_policy or current.delivery_policy,
+                field_name="delivery_policy",
+                shape=DeliveryPolicy,
+            ),
+        ),
+        evidence_refs=refs or current.evidence_refs,
+    )
 
 
 def memory_event_to_block_record(event: Any, *, backend_id: str = "") -> MemoryBlockRecord:
@@ -351,90 +431,78 @@ def memory_event_to_block_record(event: Any, *, backend_id: str = "") -> MemoryB
     source_path = str(data.get("source_path") or "").strip()
     if source_path and not str(metadata.get("source_path") or "").strip():
         metadata["source_path"] = source_path
+    sensitivity, content_mode, operational_risk = validate_memory_safety_axes(
+        data.get("sensitivity"), data.get("content_mode"), data.get("operational_risk")
+    )
     return MemoryBlockRecord(
         block_id=str(
             data.get("block_id") or data.get("canonical_id") or data.get("event_id") or ""
         ),
         content=str(data.get("content") or ""),
+        block_membership=(
+            RecordBlockMembership.from_mapping(data["block_membership"])
+            if data.get("block_membership") is not None
+            else None
+        ),
+        canonical_key=str(data.get("canonical_key") or ""),
+        revision_id=str(data.get("revision_id") or ""),
+        duplicate_cluster_id=str(data.get("duplicate_cluster_id") or ""),
+        recorded_at=str(data.get("recorded_at") or ""),
         title=str(data.get("title") or ""),
         kind=str(data.get("memory_kind") or data.get("kind") or "observation"),
-        lifecycle=str(data.get("lifecycle") or "candidate"),
-        trust_level=str(data.get("trust_level") or "agent_claim"),
-        scope=str(data.get("scope") or "run_scoped"),
-        tier=str(data.get("tier") or "warm"),
-        surface=str(data.get("surface") or "supplemental_evidence"),
+        status=data["status"] if "status" in data else "candidate",
+        retention=data["retention"] if "retention" in data else "durable",
+        delivery_policy=data["delivery_policy"] if "delivery_policy" in data else "on_demand",
+        temperature=data["temperature"] if "temperature" in data else "warm",
+        authority=data["authority"] if "authority" in data else "advisory",
+        trust_level=data["trust_level"] if "trust_level" in data else "agent_reported",
+        scope=data["scope"] if "scope" in data else "workspace",
+        verification_status=(
+            data["verification_status"] if "verification_status" in data else "unverified"
+        ),
+        verification_methods=tuple(data.get("verification_methods") or ()),
+        promotion_decision=(
+            data["promotion_decision"] if "promotion_decision" in data else "not_requested"
+        ),
+        user_id=str(data.get("user_id") or ""),
         workspace_id=str(data.get("workspace_id") or ""),
+        profile_id=str(data.get("profile_id") or "default"),
         run_id=str(data.get("run_id") or ""),
-        phase_id=str(data.get("phase_id") or data.get("phase") or ""),
+        stage_id=str(data.get("stage_id") or ""),
         subtask_id=str(data.get("subtask_id") or ""),
+        session_id=data.get("session_id", ""),
+        task_id=data.get("task_id", ""),
+        parent_session_id=data.get("parent_session_id", ""),
+        artifact_id=data.get("artifact_id", ""),
+        artifact_revision=data.get("artifact_revision", ""),
+        valid_from=data.get("valid_from", ""),
+        valid_to=data.get("valid_to", ""),
+        project_id=data.get("project_id", ""),
+        repository_id=data.get("repository_id", ""),
+        checkout=data.get("checkout", ""),
+        worktree=data.get("worktree", ""),
+        branch=data.get("branch", ""),
+        revision=data.get("revision", ""),
+        dirty_state=data.get("dirty_state", ""),
+        schema_version=data.get("schema_version", CURRENT_SCHEMA_VERSION),
+        hard_policy_version=data.get("hard_policy_version", 1),
+        semantic_catalog_version=data.get("semantic_catalog_version", ""),
         producer=str(data.get("producer") or data.get("agent_kind") or "agent"),
         source_backend=str(data.get("source_backend") or "") or backend_id,
         tags=tuple(data.get("tags") or ()),
         evidence_refs=_evidence_tuple(data.get("evidence_refs") or ()),
         external_refs=dict(data.get("external_refs") or {}),
+        sensitivity=sensitivity,
+        content_mode=content_mode,
+        operational_risk=operational_risk,
+        child_claims=data.get("child_claims", ()),
         metadata=metadata,
-        verified=bool(data.get("verified", False)),
-    )
-
-
-def durable_event_to_block_record(
-    event: DurableEvent | Any, *, backend_id: str = ""
-) -> MemoryBlockRecord:
-    data = event if isinstance(event, dict) else getattr(event, "__dict__", {})
-    kind = str(data.get("kind") or "durable")
-    return MemoryBlockRecord(
-        block_id=str(data.get("event_id") or data.get("block_id") or data.get("id") or ""),
-        content=str(data.get("content") or ""),
-        title=kind,
-        kind=kind,
-        lifecycle="active",
-        trust_level=str(data.get("trust_level") or "workspace_verified"),
-        scope="cross_run_durable"
-        if kind in _DURABLE_KINDS or kind in {"run_summary", "architecture_decision"}
-        else "run_scoped",
-        tier="warm",
-        surface="supplemental_evidence",
-        workspace_id=str(data.get("workspace_id") or ""),
-        run_id=str(data.get("run_id") or ""),
-        phase_id=str(data.get("phase_id") or ""),
-        subtask_id=str(data.get("subtask_id") or ""),
-        producer=str(data.get("agent") or "agent"),
-        source_backend=backend_id,
-        tags=tuple(data.get("tags") or ()),
-        evidence_refs=_evidence_tuple(data.get("evidence_refs") or ()),
-        metadata=dict(data.get("metadata") or {}),
-        verified=True,
-    )
-
-
-def durable_lesson_to_block_record(
-    lesson: DurableLesson | Any, *, backend_id: str = ""
-) -> MemoryBlockRecord:
-    data = lesson if isinstance(lesson, dict) else getattr(lesson, "__dict__", {})
-    return MemoryBlockRecord(
-        block_id=str(data.get("lesson_id") or data.get("block_id") or data.get("id") or ""),
-        content=str(data.get("content") or ""),
-        title=str(data.get("title") or ""),
-        kind=str(data.get("kind") or "lesson"),
-        lifecycle="active",
-        trust_level=str(data.get("trust_level") or "public_verified"),
-        scope="cross_run_durable",
-        tier="warm",
-        surface="supplemental_evidence",
-        workspace_id=str(data.get("workspace_id") or ""),
-        run_id=str(data.get("run_id") or ""),
-        phase_id=str(data.get("phase_id") or ""),
-        source_backend=backend_id,
-        tags=tuple(data.get("tags") or ()),
-        evidence_refs=_evidence_tuple(data.get("evidence_refs") or ()),
-        metadata=dict(data.get("metadata") or {}),
-        verified=True,
     )
 
 
 def _memory_hit_score(record: MemoryBlockRecord) -> float:
     metadata = dict(record.metadata or {})
-    for key in ("retrieval_score", "memory_block_rrf_score", "score", "native_score"):
+    for key in ("retrieval_score", "score", "native_score"):
         if key not in metadata:
             continue
         try:
@@ -452,37 +520,106 @@ def block_record_to_memory_hit(record: MemoryBlockRecord) -> MemoryHit:
         kind=record.kind,
         tags=list(record.tags),
         metadata={
-            "block_id": record.block_id,
-            "source_backend": record.source_backend,
-            "surface": record.surface,
-            "directive": record.surface == "directive",
-            "lifecycle": record.lifecycle,
-            "trust_level": record.trust_level,
-            "workspace_id": record.workspace_id,
-            "run_id": record.run_id,
-            "phase_id": record.phase_id,
-            "privacy_class": record.privacy_class,
-            "risk_level": record.risk_level,
             **dict(record.metadata),
+            "block_id": record.block_id,
+            "title": record.title,
+            "canonical_key": record.canonical_key,
+            "revision_id": record.revision_id,
+            "duplicate_cluster_id": record.duplicate_cluster_id,
+            "recorded_at": record.recorded_at,
+            "source_backend": record.source_backend,
+            "producer": record.producer,
+            "status": record.status,
+            "retention": record.retention,
+            "delivery_policy": record.delivery_policy,
+            "temperature": record.temperature,
+            "authority": record.authority,
+            "trust_level": record.trust_level,
+            "scope": record.scope,
+            "verification_status": record.verification_status,
+            "verification_methods": list(record.verification_methods),
+            "promotion_decision": record.promotion_decision,
+            "evidence_refs": json_ready(record.evidence_refs),
+            "user_id": record.user_id,
+            "workspace_id": record.workspace_id,
+            "profile_id": record.profile_id,
+            "run_id": record.run_id,
+            "subtask_id": record.subtask_id,
+            "session_id": record.session_id,
+            "task_id": record.task_id,
+            "parent_session_id": record.parent_session_id,
+            "artifact_id": record.artifact_id,
+            "artifact_revision": record.artifact_revision,
+            "valid_from": record.valid_from,
+            "valid_to": record.valid_to,
+            "expires_at": record.expires_at,
+            "project_id": record.project_id,
+            "repository_id": record.repository_id,
+            "checkout": record.checkout,
+            "worktree": record.worktree,
+            "branch": record.branch,
+            "revision": record.revision,
+            "dirty_state": record.dirty_state,
+            "schema_version": record.schema_version,
+            "hard_policy_version": record.hard_policy_version,
+            "semantic_catalog_version": record.semantic_catalog_version,
+            "sensitivity": record.sensitivity,
+            "content_mode": record.content_mode,
+            "operational_risk": record.operational_risk,
+            "child_claims": compact_turn_child_claims(record.child_claims),
+            "block_membership": (
+                asdict(record.block_membership) if record.block_membership is not None else None
+            ),
         },
     )
 
 
-def block_from_json(data: dict[str, Any]) -> MemoryBlockRecord:
+def index_node_from_json(data: dict[str, Any]) -> MemoryIndexNode:
     payload = dict(data)
     payload["tags"] = tuple(payload.get("tags") or ())
-    payload["supersedes"] = tuple(payload.get("supersedes") or ())
+    return MemoryIndexNode(
+        **{k: v for k, v in payload.items() if k in MemoryIndexNode.__dataclass_fields__}
+    )
+
+
+def index_node_to_json(node: MemoryIndexNode) -> dict[str, Any]:
+    return asdict(node)
+
+
+def block_from_json(data: dict[str, Any]) -> MemoryBlockRecord:
+    if not isinstance(data, dict):
+        raise ValueError("canonical memory record must be an object")
+    payload = dict(data)
+    payload.setdefault("profile_id", "default")
+    missing = sorted(_CANONICAL_RECORD_FIELDS.difference(payload))
+    unknown = sorted(set(payload).difference(_CANONICAL_RECORD_FIELDS))
+    if missing or unknown:
+        details = []
+        if missing:
+            details.append("missing " + ", ".join(missing))
+        if unknown:
+            details.append("unknown " + ", ".join(unknown))
+        raise ValueError("canonical memory record fields must be exact: " + "; ".join(details))
+    if (
+        type(payload["schema_version"]) is not int
+        or payload["schema_version"] != CURRENT_SCHEMA_VERSION
+    ):
+        raise ValueError(f"canonical memory record schema_version must be {CURRENT_SCHEMA_VERSION}")
+    payload["tags"] = tuple(payload.get("tags") or ())
+    payload["supersedes_ids"] = tuple(payload.get("supersedes_ids") or ())
     payload["evidence_refs"] = _evidence_tuple(payload.get("evidence_refs") or ())
+    if payload.get("block_membership") is not None:
+        payload["block_membership"] = RecordBlockMembership.from_mapping(
+            payload["block_membership"]
+        )
     return MemoryBlockRecord(
         **{k: v for k, v in payload.items() if k in MemoryBlockRecord.__dataclass_fields__}
     )
 
 
 def block_to_json(record: MemoryBlockRecord) -> dict[str, Any]:
+    if type(record.schema_version) is not int or record.schema_version != CURRENT_SCHEMA_VERSION:
+        raise ValueError(f"canonical memory record schema_version must be {CURRENT_SCHEMA_VERSION}")
     payload = asdict(record)
     payload["evidence_refs"] = [asdict(ref) for ref in record.evidence_refs]
     return payload
-
-
-def with_backend(record: MemoryBlockRecord, backend_id: str) -> MemoryBlockRecord:
-    return replace(record, source_backend=backend_id or record.source_backend, updated_at=_now())

@@ -1,145 +1,173 @@
 """Policy helpers for agent-authored memory routing."""
 
+from lethyx.contracts.memory import reserved_memory_metadata_keys
 from lethyx.memory.authoring.models import MemoryRouteDecision, MemoryWriteProposal
 from lethyx.memory.blocks.models import MemoryBlock
 
-_DIRECTIVE_KINDS = {"bkb_rule", "behavior", "invariant", "prospective_trigger", "core_lesson"}
-_VERIFIED_EVIDENCE_KINDS = {
-    "verified_outcome",
-    "test_run",
-    "verification_report",
-    "mutation_report",
-}
+
+def _decision_for_block(
+    *,
+    block: MemoryBlock,
+    accepted: bool,
+    reason: str,
+    tags: tuple[str, ...],
+    policy_issues: tuple[str, ...] = (),
+    suggested_block_id: str = "",
+    suggested_action: str = "",
+) -> MemoryRouteDecision:
+    return MemoryRouteDecision(
+        accepted=bool(accepted and not policy_issues),
+        reason=reason,
+        block_id=block.block_id,
+        retention=block.retention,
+        delivery_policy=block.delivery_policy,
+        temperature=block.temperature,
+        authority="advisory",
+        scope=block.scope,
+        trust_level="agent_reported",
+        verification_status="unverified",
+        verification_methods=(),
+        promotion_decision="not_requested",
+        status="candidate",
+        tags=tags,
+        policy_issues=policy_issues,
+        suggested_block_id=suggested_block_id,
+        suggested_action=suggested_action,
+    )
 
 
-def _has_typed_evidence(write: MemoryWriteProposal) -> bool:
-    return any(
-        isinstance(ref, dict)
-        and ref.get("ref_type")
-        and ref.get("ref_id")
-        and ref.get("produced_by")
-        for ref in write.evidence_refs
+def _unbound_decision(
+    *,
+    block_id: str,
+    reason: str,
+    tags: tuple[str, ...],
+    policy_issues: tuple[str, ...],
+) -> MemoryRouteDecision:
+    return MemoryRouteDecision(
+        accepted=False,
+        reason=reason,
+        block_id=block_id,
+        retention="durable",
+        delivery_policy="on_demand",
+        temperature="warm",
+        authority="advisory",
+        scope="workspace",
+        trust_level="agent_reported",
+        verification_status="unverified",
+        verification_methods=(),
+        promotion_decision="not_requested",
+        status="candidate",
+        tags=tags,
+        policy_issues=policy_issues,
     )
 
 
 def route_by_taxonomy(write: MemoryWriteProposal, blocks: list[MemoryBlock]) -> MemoryRouteDecision:
+    """Validate one explicit structural block choice without semantic rerouting."""
+
     tags = tuple(dict.fromkeys([*write.tags, write.kind]))
+    requested_block_id = str(write.requested_block_id or "").strip()
+    if not requested_block_id:
+        return _unbound_decision(
+            block_id="",
+            reason="requested_block_id_required",
+            tags=tags,
+            policy_issues=("requested_block_id_required",),
+        )
     by_id = {block.block_id: block for block in blocks}
-    block = by_id.get(write.requested_block_id) if write.requested_block_id else None
-    issues: list[str] = []
-    verified = write.evidence_kind in _VERIFIED_EVIDENCE_KINDS and _has_typed_evidence(write)
-    if write.kind in _DIRECTIVE_KINDS or write.metadata.get("surface") == "directive":
-        return MemoryRouteDecision(
-            False,
-            "direct_directive_write_requires_promotion_gate",
-            "active_bkb",
-            "palace.lesson",
-            "warm",
-            "cross_run_durable",
-            "directive",
-            "candidate",
-            "agent_claim",
-            False,
-            tags,
-            ("promotion_gate_required",),
+    requested = by_id.get(requested_block_id)
+    if requested is None:
+        return _unbound_decision(
+            block_id=requested_block_id,
+            reason="unknown_requested_block",
+            tags=tags,
+            policy_issues=("unknown_logical_block_id",),
         )
-    if block is not None:
-        return MemoryRouteDecision(
-            True,
-            "requested_block_policy",
-            block.block_id,
-            write.requested_store or block.store,
-            block.tier,
-            block.scope,
-            block.default_surface,
-            "active" if verified else "candidate",
-            "mutation_verified" if verified else "agent_claim",
-            verified,
-            tags,
+    parent_ids = {block.parent_id for block in blocks if block.parent_id}
+    writable_leaf_ids = sorted(
+        block.block_id
+        for block in blocks
+        if block.agent_writable
+        and not block.index_only
+        and block.authority == "advisory"
+        and not block.child_ids
+        and block.block_id not in parent_ids
+    )
+    suggested_block_id = (
+        "decisions_and_contracts"
+        if "decisions_and_contracts" in writable_leaf_ids
+        else (writable_leaf_ids[0] if writable_leaf_ids else "")
+    )
+    suggested_action = "retry_remember" if suggested_block_id else ""
+
+    reserved = reserved_memory_metadata_keys(write.metadata)
+    if reserved:
+        return _decision_for_block(
+            block=requested,
+            accepted=False,
+            reason="reserved_metadata_governance_field",
+            tags=tags,
+            policy_issues=tuple(f"reserved_metadata:{key}" for key in reserved),
         )
-    if write.kind in {"hypothesis", "idea", "research_lead"}:
-        return MemoryRouteDecision(
-            True,
-            "idea_jsonl_only_unverified",
-            "project_ideas",
-            "ideas.jsonl",
-            "cold",
-            "workspace",
-            "reflection_candidate",
-            "candidate",
-            "agent_claim",
-            False,
-            tags,
+    if requested.block_id == "verified_lessons":
+        reflection = by_id.get("reflection_candidates")
+        suggested_reflection = (
+            reflection.block_id
+            if reflection is not None and reflection.agent_writable and not reflection.index_only
+            else ""
         )
-    if write.kind in {"github_project", "repo_capsule", "code_chunk"}:
-        return MemoryRouteDecision(
-            True,
-            "external_project_passive_codeptr",
-            "github_repo_capsules",
-            "palace.codeptr",
-            "warm",
-            "cross_run_durable",
-            "supplemental_evidence",
-            "active",
-            "public_verified" if verified else "agent_claim",
-            verified,
-            tags,
+        return _decision_for_block(
+            block=requested,
+            accepted=False,
+            reason="verified_lesson_requires_typed_promotion",
+            tags=tags,
+            policy_issues=("typed_verification_and_tribunal_required",),
+            suggested_block_id=suggested_reflection,
+            suggested_action="retry_remember" if suggested_reflection else "",
         )
-    if write.kind == "research_finding":
-        if not _has_typed_evidence(write):
-            issues.append("research_finding_requires_typed_evidence")
-        return MemoryRouteDecision(
-            not issues,
-            "research_finding_hot_with_evidence" if not issues else "blocked_missing_evidence",
-            "current_run_state",
-            "palace.run",
-            "hot",
-            "run_scoped",
-            "current_run_state",
-            "active" if not issues else "candidate",
-            "mutation_verified" if not issues else "agent_claim",
-            not issues,
-            tags,
-            tuple(issues),
+    if requested.index_only:
+        return _decision_for_block(
+            block=requested,
+            accepted=False,
+            reason="index_only_block_cannot_store_records",
+            tags=tags,
+            policy_issues=("index_only_not_record_storage",),
+            suggested_block_id=suggested_block_id,
+            suggested_action=suggested_action,
         )
-    if write.kind in {"lesson", "verified_finding"} and verified:
-        return MemoryRouteDecision(
-            True,
-            "verified_lesson_passive",
-            "verified_lessons",
-            "palace.lesson",
-            "warm",
-            "cross_run_durable",
-            "supplemental_evidence",
-            "active",
-            "mutation_verified",
-            True,
-            tags,
+    if not requested.agent_writable:
+        return _decision_for_block(
+            block=requested,
+            accepted=False,
+            reason="host_managed_block_cannot_accept_agent_writes",
+            tags=tags,
+            policy_issues=("host_managed_block",),
+            suggested_block_id=suggested_block_id,
+            suggested_action=suggested_action,
         )
-    if write.kind in {"tool_log", "terminal_scrollback", "watcher_incident"}:
-        return MemoryRouteDecision(
-            True,
-            "log_archive_hint",
-            "transient_logs",
-            "palace.transient",
-            "transient",
-            "transient",
-            "archive_hint",
-            "active",
-            "agent_claim",
-            False,
-            tags,
+    if requested.child_ids or any(block.parent_id == requested.block_id for block in blocks):
+        return _decision_for_block(
+            block=requested,
+            accepted=False,
+            reason="non_leaf_block_cannot_store_records",
+            tags=tags,
+            policy_issues=("non_leaf_not_record_storage",),
+            suggested_block_id=suggested_block_id,
+            suggested_action=suggested_action,
         )
-    return MemoryRouteDecision(
-        True,
-        "default_passive_candidate",
-        "project_ideas",
-        "ideas.jsonl",
-        "cold",
-        "workspace",
-        "reflection_candidate",
-        "candidate",
-        "agent_claim",
-        False,
-        tags,
+    if requested.authority != "advisory":
+        return _decision_for_block(
+            block=requested,
+            accepted=False,
+            reason="agent_write_requires_typed_promotion_route",
+            tags=tags,
+            policy_issues=("typed_promotion_route_required",),
+            suggested_block_id=suggested_block_id,
+            suggested_action=suggested_action,
+        )
+    return _decision_for_block(
+        block=requested,
+        accepted=True,
+        reason="requested_block_policy",
+        tags=tags,
     )

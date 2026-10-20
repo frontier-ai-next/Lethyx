@@ -20,3 +20,11 @@ build/
 runs/
 benchmarks/memory_bench/.memory_bench_raw/
 benchmarks/memory_bench/workspaces/
+.codex*
+.Lethyx/
+.tox/
+.coverage
+coverage.xml
+htmlcov/
+site/
+public/

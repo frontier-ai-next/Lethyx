@@ -1,0 +1,131 @@
+# Backends
+
+Lethyx selects one durable backend for a configured workspace runtime. The
+semantic tree and contracts stay the same; each backend provides a different
+native partition primitive and operating model.
+Hindsight and Mnemosyne batch writes may use temporary workers for distinct leaves;
+their worker-owned SQLite connections close when each worker finishes.
+Backend close waits for active partition projection calls before closing native
+SDK resources and SQLite connections. Work not yet started remains durable in
+the outbox for reopening; closing is not a claim that the entire outbox drained.
+
+## Comparison
+
+| Backend | Good fit | Native leaf partition | External service |
+| --- | --- | --- | --- |
+| MemPalace | Local development and self-contained profiles | Chroma collection family | No |
+| Hindsight | Service-backed retain/recall and Hindsight deployments | Hindsight bank | Usually |
+| Mnemosyne | Local Mnemosyne/BEAM storage | Separate database and native session per leaf | No |
+| Zvec | Embedded dense and full-text search | Separate Zvec collection per leaf | No |
+
+Mnemosyne's native session identifier belongs to a semantic leaf, rather than
+to a Hermes session. Its database also isolates that leaf before native top-k
+retrieval.
+
+## MemPalace
+
+MemPalace is installed with the base package and is the default for the Python
+and MCP interfaces:
+
+```console
+set LETHYX_BACKEND=mempalace
+lethyx backend-health --repo-root ./agent-memory --workspace alpha --backend mempalace --json
+```
+
+Data is stored under the workspace's `.memory/mempalace` area. Each logical
+leaf has a native collection-family identity. A new leaf is materialized on its
+first eligible write.
+
+## Hindsight
+
+Install the client extra:
+
+```console
+python -m pip install "lethyx[hindsight]"
+```
+
+Configure the runtime:
+
+| Variable | Default | Meaning |
+| --- | --- | --- |
+| `LETHYX_HINDSIGHT_BASE_URL` | `http://localhost:8888` | Service URL |
+| `LETHYX_HINDSIGHT_API_KEY` | empty | Service credential |
+| `LETHYX_HINDSIGHT_TIMEOUT_SECONDS` | `30` | Client timeout |
+| `LETHYX_HINDSIGHT_EMBEDDED` | `0` | Use embedded mode when supported |
+| `LETHYX_HINDSIGHT_PROFILE` | `lethyx-dev` | Hindsight profile |
+| `LETHYX_HINDSIGHT_RETAIN_ASYNC` | `0` | Asynchronous retention |
+| `LETHYX_HINDSIGHT_FAIL_CLOSED` | `1` | Refuse native-unhealthy operation |
+
+Each Lethyx leaf maps to its own Hindsight bank. Health is native only when the
+configured service and retain/recall surface are available. The sidecar index
+does not masquerade as a healthy Hindsight recall path.
+Semantic leaf banks use the native extraction defaults, without imposing a
+technical workspace or BKB mission on model-authored topics.
+
+## Mnemosyne
+
+Mnemosyne support is installed with the base package. Select it with:
+
+```console
+set LETHYX_BACKEND=mnemosyne
+```
+
+| Variable | Default | Meaning |
+| --- | --- | --- |
+| `LETHYX_MNEMOSYNE_ENABLED` | `1` | Enable native Mnemosyne access |
+| `LETHYX_MNEMOSYNE_DATA_DIR` | workspace `.memory/mnemosyne` | Native data directory |
+
+Each leaf receives a stable native session-partition identifier derived from
+its workspace, block ID, and stable backend partition key. A separate native
+database lives under `partitions/<partition-identity-sha256>/mnemosyne.db`.
+Native FTS and dense retrieval therefore rank only that partition's records.
+Lethyx also maintains its typed sidecar index for contracts and audit operations;
+semantic recall remains a native Mnemosyne operation. Discovery of existing
+leaf partitions uses indexed canonical memberships instead of loading every
+record in the store.
+
+All four native backends support staged split/merge projection into new leaf
+partitions. Each staged copy preserves the exact canonical record and is verified
+before the catalog switches membership. A failed native stage leaves the source
+leaf readable and the generation pending for a bounded retry; the sidecar is
+never used to claim successful native recall. Hindsight requires a healthy
+retain/get/recall service for this operation.
+
+An empty `retain_blocks([])` batch returns zero writes without opening a native
+partition or starting batch workers.
+
+An older shared `mnemosyne.db` directly in the native data directory reports
+`native_projection_rebuild_required` and refuses native access. Its history is
+preserved. Use a clean store for a fresh run; existing deployments require an
+explicit reconstruction of native projections from their retained canonical
+history. Lethyx does not silently discard or reinterpret the shared database.
+
+## Zvec
+
+Install the optional embedded backend with `python -m pip install "lethyx[zvec]"`
+and select `LETHYX_BACKEND=zvec`. Zvec 0.7 provides a separate collection for
+each leaf. Canonical records, receipts, and the projection outbox remain in
+Lethyx's SQLite store. Native indexing uses overlapping source windows with
+exact offsets; neither the windows nor their embeddings replace the full
+canonical record. Projection fetches, embeds, writes and verifies at most 256
+windows per batch, below Zvec's 1024-document write limit. A retry verifies
+already written windows and continues with missing ones; it does not create new
+records or truncate long sources. The outbox commits only after all batches
+have been verified. Windows never become independent semantic facts. The full
+source remains available by exact record ID. Dense and native full-text
+retrieval operate only on the selected leaf collections. A pending or failed
+native projection is reported as such, rather than silently treated as an
+empty memory. Zvec's embedded index has no external server to start.
+
+## Switching backends
+
+Changing `LETHYX_BACKEND` does not move existing records. Start a separate
+clean store for the new backend; this release has no old-store conversion
+command. Do not point a new backend at old projections and rely on fallback
+filtering.
+
+Always check health before starting a long session:
+
+```console
+lethyx backend-health --repo-root ./agent-memory --workspace alpha --backend mempalace --json
+```

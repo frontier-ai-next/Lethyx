@@ -1,0 +1,69 @@
+site_name: Lethyx
+site_description: Evolving block memory for long-running agents
+repo_name: frontier-ai-next/Lethyx
+repo_url: https://github.com/frontier-ai-next/Lethyx
+docs_dir: docs/lethyx
+site_dir: site
+use_directory_urls: true
+
+theme:
+  name: material
+  language: en
+  features:
+    - navigation.indexes
+    - navigation.sections
+    - navigation.top
+    - search.highlight
+    - search.suggest
+    - content.code.copy
+  palette:
+    - media: "(prefers-color-scheme: light)"
+      scheme: default
+      primary: indigo
+      accent: teal
+      toggle:
+        icon: material/brightness-7
+        name: Use dark mode
+    - media: "(prefers-color-scheme: dark)"
+      scheme: slate
+      primary: indigo
+      accent: teal
+      toggle:
+        icon: material/brightness-4
+        name: Use light mode
+
+plugins:
+  - search
+
+markdown_extensions:
+  - admonition
+  - attr_list
+  - md_in_html
+  - tables
+  - toc:
+      permalink: true
+  - pymdownx.details
+  - pymdownx.highlight:
+      anchor_linenums: true
+  - pymdownx.inlinehilite
+  - pymdownx.superfences
+
+extra_css:
+  - stylesheets/extra.css
+
+nav:
+  - Home: index.md
+  - Understand:
+      - Mental model: memory_architecture.md
+      - Data and isolation: data_model.md
+  - Get started:
+      - Install and quickstart: quickstart.md
+      - Hermes: hermes_runtime_integration_user_guide.md
+      - MCP and Python: interfaces.md
+      - Backends: backends.md
+  - Operate:
+      - Operator guide: operator_guide.md
+      - Troubleshooting: troubleshooting.md
+  - Maintain:
+      - Guide for agents and contributors: agent_guide.md
+      - Developer profiling: developer_profiling.md

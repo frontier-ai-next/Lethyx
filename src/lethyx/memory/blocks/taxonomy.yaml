@@ -1,48 +1,86 @@
-levels:
-  manager_core:
+﻿levels:
+  user_global_preferences:
+    kinds: [user_profile, user_preference, explicit_preference]
+    temperature: warm
+    delivery_policy: on_demand
+    authority: advisory
+    retention: durable
+  user_global_core_directives:
     kinds: [charter, identity, architecture_contract]
-    store: palace.charter
-    tier: always_on
-    surface: directive
+    temperature: warm
+    delivery_policy: always_on
+    authority: directive
+    retention: durable
     direct_agent_write: false
-  active_bkb:
-    kinds: [bkb_rule, behavior, invariant, prospective_trigger]
-    store: palace.lesson
-    tier: warm
-    surface: directive
-    promotion_gate_required: true
+  workspace_core_directives:
+    kinds: [bkb_rule, behavior, invariant]
+    temperature: warm
+    delivery_policy: always_on
+    authority: directive
+    retention: durable
+    promotion_decision_required: true
   verified_lessons:
     kinds: [lesson, verified_finding]
-    store: palace.lesson
-    tier: warm
-    surface: supplemental_evidence
+    temperature: warm
+    delivery_policy: on_demand
+    retention: durable
   project_ideas:
     kinds: [idea, hypothesis, research_lead]
-    store: ideas.jsonl
-    tier: cold
-    surface: reflection_candidate
-  research_findings:
-    kinds: [research_finding]
-    store: palace.run
-    tier: hot
-    surface: current_run_state
-  current_run_state:
-    kinds: [phase_plan, subtask_card, execution_artifact]
-    store: palace.run
-    tier: hot
-    surface: current_run_state
-  logs:
+    temperature: cold
+    delivery_policy: reflection_only
+    retention: durable
+  task_state:
+    kinds: [working_state_checkpoint]
+    temperature: hot
+    delivery_policy: working_set
+    retention: session
+  execution_working_state:
+    kinds: [research_finding, planning_artifact, subtask_card, execution_artifact]
+    temperature: hot
+    delivery_policy: working_set
+    retention: session
+  transient_logs:
     kinds: [tool_log, terminal_scrollback, watcher_incident]
-    store: palace.transient
-    tier: transient
-    surface: archive_hint
-  external_projects:
-    kinds: [github_project, repo_capsule, code_chunk]
-    store: palace.codeptr
-    tier: warm
-    surface: supplemental_evidence
-  hindsight_candidates:
-    kinds: [hindsight_candidate, reflection]
-    store: bkb_proposals
-    tier: cold
-    surface: reflection_candidate
+    temperature: cold
+    retention: ephemeral
+    delivery_policy: hidden
+  project_resources:
+    kinds: [github_project, repo_capsule]
+    temperature: warm
+    delivery_policy: on_demand
+    retention: durable
+  code_resources:
+    kinds: [code_chunk]
+    temperature: cold
+    delivery_policy: on_demand
+    retention: durable
+  stable_project_facts:
+    kinds: [project_fact, fact]
+    temperature: warm
+    delivery_policy: on_demand
+    retention: durable
+  mutable_project_state:
+    kinds: [project_state, mutable_project_state, configuration_state]
+    temperature: hot
+    delivery_policy: on_demand
+    retention: durable
+  decisions_and_contracts:
+    kinds: [decision, architecture_decision, contract, project_contract]
+    temperature: warm
+    delivery_policy: on_demand
+    retention: durable
+  artifact_claims:
+    kinds: [artifact_claim, artifact_status, build_artifact, test_artifact, release_artifact]
+    temperature: warm
+    delivery_policy: on_demand
+    retention: durable
+  workspace_episodes:
+    kinds: [episode, event_sequence]
+    temperature: warm
+    delivery_policy: on_demand
+    retention: durable
+  reflection_candidates:
+    kinds: [reflection_candidate, reflection]
+    temperature: warm
+    delivery_policy: reflection_only
+    retention: durable
