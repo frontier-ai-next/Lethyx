@@ -316,7 +316,25 @@ class MnemosyneBackend:
         record: MemoryBlockRecord,
         commit_revision: int,
     ) -> str:
-        return cls._provider_temporal_tags(cls._native_content_envelope(record, commit_revision))
+        return cls._native_content_envelope(record, commit_revision)
+
+    @classmethod
+    def _native_content_variants(
+        cls,
+        record: MemoryBlockRecord,
+        commit_revision: int,
+    ) -> set[str]:
+        """Accepted stored contents across Mnemosyne versions.
+
+        Before Mnemosyne 3.x the provider appended ``[DATES: ...]`` /
+        ``[DURATIONS: ...]`` to the stored text.  Current releases keep those
+        annotations in metadata (``_dates`` / ``_durations``) and store the
+        caller's text verbatim, so both shapes are valid for rows written by
+        Lethyx.
+        """
+
+        envelope = cls._native_content_envelope(record, commit_revision)
+        return {envelope, cls._provider_temporal_tags(envelope)}
 
     @staticmethod
     def _importance(record: MemoryBlockRecord) -> float:
@@ -397,7 +415,7 @@ class MnemosyneBackend:
         if str(item.get("source") or "") != native_block_source(primary_block_id):
             raise ValueError("mnemosyne native block source mismatch")
         content = item.get("content")
-        if not isinstance(content, str) or content != self._native_expected_content(
+        if not isinstance(content, str) or content not in self._native_content_variants(
             record, commit_revision
         ):
             raise ValueError("mnemosyne native canonical record content mismatch")
