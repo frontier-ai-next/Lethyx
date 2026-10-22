@@ -2,25 +2,25 @@ from dataclasses import replace
 
 import pytest
 
-from lethyx import MemoryClient
-from lethyx.contracts import ConsolidationCommitReceipt, EvidenceRef
-from lethyx.memory.backends.contracts import EdgeType, MemoryEdgeRecord, MemoryIndexNode
-from lethyx.memory.backends.sqlite_index import BackendSQLiteIndex
-from lethyx.memory.blocks.catalog import (
+from um_mem import MemoryClient
+from um_mem.contracts import ConsolidationCommitReceipt, EvidenceRef
+from um_mem.memory.backends.contracts import EdgeType, MemoryEdgeRecord, MemoryIndexNode
+from um_mem.memory.backends.sqlite_index import BackendSQLiteIndex
+from um_mem.memory.blocks.catalog import (
     block_descriptor_node_id,
     compile_semantic_catalog,
     sync_block_descriptor_index,
 )
-from lethyx.memory.blocks.models import MemoryBlock
-from lethyx.memory.blocks.registry import (
+from um_mem.memory.blocks.models import MemoryBlock
+from um_mem.memory.blocks.registry import (
     load_memory_blocks,
     validate_leaf_block_contracts,
     validate_memory_block_tree,
 )
-from lethyx.memory.edge_graph import score_memory_edges
-from lethyx.memory.kernel.models import block_record_to_event
-from lethyx.memory.kernel.writer import _write_memory_event
-from lethyx.memory.mutation import plan_memory_mutation
+from um_mem.memory.edge_graph import score_memory_edges
+from um_mem.memory.kernel.models import block_record_to_event
+from um_mem.memory.kernel.writer import _write_memory_event
+from um_mem.memory.mutation import plan_memory_mutation
 
 
 def _evidence(name: str) -> EvidenceRef:
@@ -286,7 +286,7 @@ def test_every_leaf_block_has_operational_contract(tmp_path) -> None:
 
 
 def test_unknown_logical_block_field_is_rejected(tmp_path) -> None:
-    blocks_path = tmp_path / ".Lethyx" / "memory" / "blocks.yaml"
+    blocks_path = tmp_path / ".UM-MEM" / "memory" / "blocks.yaml"
     blocks_path.parent.mkdir(parents=True)
     blocks_path.write_text(
         """

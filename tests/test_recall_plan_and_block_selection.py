@@ -2,9 +2,9 @@ from pathlib import Path
 
 import pytest
 
-from lethyx.memory.backends.query_policy import normalize_query_payload
-from lethyx.memory.blocks.registry import load_memory_blocks
-from lethyx.memory.recall_plan import RecallPlan
+from um_mem.memory.backends.query_policy import normalize_query_payload
+from um_mem.memory.blocks.registry import load_memory_blocks
+from um_mem.memory.recall_plan import RecallPlan
 
 
 def test_recall_plan_payload_keeps_logical_blocks_and_record_ids_separate() -> None:
@@ -152,7 +152,7 @@ def test_recall_plan_requires_search_all_to_be_explicit_and_exclusive() -> None:
     ],
 )
 def test_block_registry_rejects_unknown_fields(tmp_path: Path, routing_yaml: str) -> None:
-    config = tmp_path / ".Lethyx" / "memory" / "blocks.yaml"
+    config = tmp_path / ".UM-MEM" / "memory" / "blocks.yaml"
     config.parent.mkdir(parents=True)
     config.write_text(
         f"""blocks:

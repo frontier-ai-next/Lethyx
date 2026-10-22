@@ -1,9 +1,9 @@
 {
-  "name": "@lethyx/cli",
+  "name": "@um-mem/cli",
   "version": "0.1.0",
-  "description": "Install and run the Lethyx memory engine",
+  "description": "Install and run the UM-MEM memory engine",
   "bin": {
-    "lethyx": "bin/lethyx.js"
+    "um-memory": "bin/um-memory.js"
   },
   "files": [
     "bin",
@@ -16,12 +16,12 @@
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "https://github.com/frontier-ai-next/Lethyx.git"
+    "url": "https://github.com/frontier-ai-next/UM-MEM.git"
   },
   "keywords": [
     "memory",
     "mcp",
     "agent",
-    "lethyx"
+    "um-mem"
   ]
 }

@@ -1,6 +1,7 @@
 from concurrent.futures import ThreadPoolExecutor
-from lethyx.memory.catalog_store import WorkspaceCatalogStore
-from lethyx.memory.blocks.models import MemoryBlock
+
+from um_mem.memory.blocks.models import MemoryBlock
+from um_mem.memory.catalog_store import WorkspaceCatalogStore
 
 
 def _block(block_id: str, parent_id: str) -> MemoryBlock:

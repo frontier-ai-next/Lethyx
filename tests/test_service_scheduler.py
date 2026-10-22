@@ -6,15 +6,14 @@ from datetime import UTC, datetime, timedelta
 
 import pytest
 
-from lethyx.memory import mcp_call
-from lethyx.memory.local_service import build_local_service_identity
-from lethyx.memory.prospective import ProspectiveTriggerDecision
-from lethyx.memory.service_scheduler import (
+from um_mem.memory import mcp_call
+from um_mem.memory.local_service import build_local_service_identity
+from um_mem.memory.prospective import ProspectiveTriggerDecision
+from um_mem.memory.service_scheduler import (
     AdvisoryDecisionPlan,
     HostStateEvent,
     ServiceScheduler,
 )
-
 
 _NOW = datetime(2026, 7, 13, 12, 0, tzinfo=UTC)
 
@@ -213,11 +212,11 @@ def test_typed_trigger_dimensions_persist_only_hashed_rule_and_action_evidence(
         event_id="typed-dimension-event",
         retry_count=1,
         agent_kind="codex",
-        changed_paths=("src/lethyx/memory/service_scheduler.py",),
+        changed_paths=("src/um_mem/memory/service_scheduler.py",),
         artifacts=("reports/scheduler.json",),
         previous_stage_id="stage_2",
         failure_signatures=("retryable_failure",),
-        env_flags=("LETHYX_TEST_MODE",),
+        env_flags=("UM_MEM_TEST_MODE",),
     )
 
     plan = mcp_call._host_state_scheduler_plan(_identity(tmp_path), event, client=_Client())
@@ -287,7 +286,6 @@ def test_scheduler_records_bounded_assessment_without_authorizing_semantic_mutat
     assert by_kind["consolidation_assessment"].status == "recorded"
     assert by_kind["consolidation_assessment"].outcome == "consolidation_assessment_recorded"
     assert {job.status for job in scheduler.jobs_for(submitted.event_id_sha256)} == {
-        "recorded",
         "recorded",
     }
 

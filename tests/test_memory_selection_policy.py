@@ -2,31 +2,31 @@ from typing import Any
 
 import pytest
 
-from lethyx.contracts import EvidenceRef, MemoryBlockRecord
-from lethyx.memory.selection import MemorySelectionPolicy, SelectionContext
+from um_mem.contracts import EvidenceRef, MemoryBlockRecord
+from um_mem.memory.selection import MemorySelectionPolicy, SelectionContext
 
 
 def _block(**overrides: Any) -> MemoryBlockRecord:
-    base = dict(
-        block_id="active",
-        content="alpha project memory",
-        title="Alpha",
-        kind="observation",
-        status="accepted",
-        retention="durable",
-        delivery_policy="on_demand",
-        temperature="warm",
-        authority="advisory",
-        trust_level="workspace_verified",
-        scope="workspace",
-        verification_status="verified",
-        verification_methods=("test_run",),
-        promotion_decision="accepted",
-        workspace_id="alpha",
-        run_id="run-1",
-        producer="test",
-        tags=("alpha",),
-        evidence_refs=(
+    base = {
+        "block_id": "active",
+        "content": "alpha project memory",
+        "title": "Alpha",
+        "kind": "observation",
+        "status": "accepted",
+        "retention": "durable",
+        "delivery_policy": "on_demand",
+        "temperature": "warm",
+        "authority": "advisory",
+        "trust_level": "workspace_verified",
+        "scope": "workspace",
+        "verification_status": "verified",
+        "verification_methods": ("test_run",),
+        "promotion_decision": "accepted",
+        "workspace_id": "alpha",
+        "run_id": "run-1",
+        "producer": "test",
+        "tags": ("alpha",),
+        "evidence_refs": (
             EvidenceRef(
                 ref_type="test_run",
                 ref_id="policy",
@@ -34,8 +34,8 @@ def _block(**overrides: Any) -> MemoryBlockRecord:
                 producer_id="verifier:policy",
             ),
         ),
-        metadata={},
-    )
+        "metadata": {},
+    }
     base.update(overrides)
     return MemoryBlockRecord(**base)
 

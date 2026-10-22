@@ -2,13 +2,13 @@ from dataclasses import replace
 
 import pytest
 
-from lethyx.contracts import (
+from um_mem.contracts import (
     ConsolidationAssessment,
     ConsolidationCommitReceipt,
     ConsolidationDecision,
     ConsolidationTransition,
-    ContinuationSufficiencyAssessment,
     ContextualUtilitySummary,
+    ContinuationSufficiencyAssessment,
     DerivationReceipt,
     EvidenceRef,
     FoldedBranch,
@@ -24,14 +24,14 @@ from lethyx.contracts import (
     VerificationReportRef,
     WorkingStateCheckpoint,
 )
-from lethyx.memory.kernel.models import block_record_to_event
-from lethyx.memory.backends import contracts as backend_contracts
-from lethyx.memory.backends.factory import (
+from um_mem.contracts.memory import CURRENT_SCHEMA_VERSION
+from um_mem.memory.backends import contracts as backend_contracts
+from um_mem.memory.backends.factory import (
     allowed_memory_backend_modes,
     selected_memory_backend_mode,
 )
-from lethyx.contracts.memory import CURRENT_SCHEMA_VERSION
-from lethyx.memory.kernel import models as kernel_models
+from um_mem.memory.kernel import models as kernel_models
+from um_mem.memory.kernel.models import block_record_to_event
 
 
 def _evidence() -> tuple[EvidenceRef, ...]:
@@ -82,8 +82,8 @@ def _checkpoint(evidence: tuple[EvidenceRef, ...]) -> WorkingStateCheckpoint:
         unresolved_constraints=("single canonical owner",),
         project_id="project:alpha",
         repository_id="repository:alpha",
-        checkout="C:/repo/Lethyx",
-        worktree="C:/repo/Lethyx",
+        checkout="C:/repo/UM-MEM",
+        worktree="C:/repo/UM-MEM",
         branch="main",
         revision="abc123",
         dirty_state="dirty:abc",
@@ -93,7 +93,7 @@ def _checkpoint(evidence: tuple[EvidenceRef, ...]) -> WorkingStateCheckpoint:
         host_version="codex/2026-07-14",
         model_version="sol",
         prompt_version="master-plan/phase-3.5",
-        touched_files=("src/lethyx/contracts/memory.py",),
+        touched_files=("src/um_mem/contracts/memory.py",),
         touched_symbols=("MemoryEvent",),
         current_diff="sha256:contract-diff",
         tests=("tests/test_memory_contract_alignment.py",),
@@ -128,8 +128,8 @@ def _canonical_event(**overrides: object) -> MemoryEvent:
         "valid_to": "2026-07-14T10:00:00Z",
         "project_id": "project:alpha",
         "repository_id": "repository:alpha",
-        "checkout": "C:/repo/Lethyx",
-        "worktree": "C:/repo/Lethyx",
+        "checkout": "C:/repo/UM-MEM",
+        "worktree": "C:/repo/UM-MEM",
         "branch": "main",
         "revision": "abc123",
         "dirty_state": "sha256:dirty",
@@ -582,7 +582,7 @@ def test_state_transition_shapes_expose_fields_and_safe_defaults() -> None:
             memory_id="memory-1",
             task_family="alignment",
             stage="test",
-            project_id="lethyx",
+            project_id="um-mem",
             host_id="codex",
             profile_id="test",
             minimum_support=1,
@@ -630,7 +630,7 @@ def _credit_fixture(
         approval_principal_id="",
         task_family="alignment",
         stage="test",
-        project_id="lethyx",
+        project_id="um-mem",
         host_id="codex",
         profile_id="test",
         independence_domain="run-1",

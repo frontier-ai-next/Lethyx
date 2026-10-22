@@ -1,16 +1,16 @@
-from pathlib import Path
-from contextlib import contextmanager
-from concurrent.futures import ThreadPoolExecutor
 import threading
+from concurrent.futures import ThreadPoolExecutor
+from contextlib import contextmanager
+from pathlib import Path
 from uuid import UUID
 
 import pytest
 
-from lethyx import MemoryClient
-from lethyx.memory.backends.mempalace import MemPalaceBackend
-from lethyx.memory.backends.mnemosyne import MnemosyneBackend
-from lethyx.memory.backends.sqlite_index import BackendSQLiteIndex
-from lethyx.memory.catalog_store import (
+from um_mem import MemoryClient
+from um_mem.memory.backends.mempalace import MemPalaceBackend
+from um_mem.memory.backends.mnemosyne import MnemosyneBackend
+from um_mem.memory.backends.sqlite_index import BackendSQLiteIndex
+from um_mem.memory.catalog_store import (
     BlockEvolutionTarget,
     BlockMergeSource,
     WorkspaceCatalogStore,

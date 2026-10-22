@@ -5,25 +5,26 @@ from pathlib import Path
 
 import pytest
 
-from lethyx.contracts import (
-    ContinuationPacket,
+from um_mem.contracts import (
     ContinuationLiteralSet,
+    ContinuationPacket,
     EvidenceRef,
     FoldedBranch,
     MemoryBlockRecord,
     RecordBlockMembership,
     WorkingStateCheckpoint,
 )
-from lethyx.contracts.memory import CURRENT_SCHEMA_VERSION
-from lethyx.memory.backends.sqlite_index import BackendSQLiteIndex
-from lethyx.memory.blocks.registry import load_workspace_topology, create_workspace_block
-from lethyx.memory.working_continuity import (
+from um_mem.contracts.memory import CURRENT_SCHEMA_VERSION
+from um_mem.memory.backends.sqlite_index import BackendSQLiteIndex
+from um_mem.memory.blocks.registry import create_workspace_block, load_workspace_topology
+from um_mem.memory.working_continuity import (
     ContinuityTrial,
     assess_continuation_sufficiency,
     commit_host_compaction_projection,
     commit_working_state_checkpoint,
     compare_continuity_strategies,
     compile_continuation_packet,
+    continuation_source_hash,
     evaluate_folded_branch_reopen,
     fold_completed_branch,
     load_working_state_history,
@@ -31,9 +32,7 @@ from lethyx.memory.working_continuity import (
     recover_continuation_after_failure,
     verify_forced_restart_continuation,
     working_state_canonical_key,
-    continuation_source_hash,
 )
-
 
 _WORKSPACE = "alpha"
 _SESSION = "session-1"
@@ -188,8 +187,8 @@ def _checkpoint(**overrides: object) -> WorkingStateCheckpoint:
         "unresolved_constraints": ("memory remains advisory",),
         "project_id": "project:alpha",
         "repository_id": "repository:alpha",
-        "checkout": "C:/repo/Lethyx",
-        "worktree": "C:/repo/Lethyx",
+        "checkout": "C:/repo/UM-MEM",
+        "worktree": "C:/repo/UM-MEM",
         "branch": "main",
         "revision": "abc123",
         "dirty_state": "sha256:dirty",
@@ -199,7 +198,7 @@ def _checkpoint(**overrides: object) -> WorkingStateCheckpoint:
         "host_version": "codex/2026-07-14",
         "model_version": "sol",
         "prompt_version": "master-plan/phase-3.5",
-        "touched_files": ("src/lethyx/memory/working_continuity.py",),
+        "touched_files": ("src/um_mem/memory/working_continuity.py",),
         "touched_symbols": ("commit_working_state_checkpoint",),
         "current_diff": "sha256:working-diff",
         "tests": ("tests/test_working_continuity.py",),
@@ -999,12 +998,12 @@ def test_continuation_rejects_changed_tail_and_foreign_profile() -> None:
 
 
 def test_host_verified_checkpoint_stores_view_without_host_transcript(tmp_path) -> None:
-    from lethyx.memory.working_continuity import checkpoint_verification_subject
-    from lethyx.contracts.ledger import append_candidate_semantic_verification_ledger_event
+    from um_mem.contracts.ledger import append_candidate_semantic_verification_ledger_event
+    from um_mem.memory.working_continuity import checkpoint_verification_subject
 
     source_index = BackendSQLiteIndex(tmp_path / "host-history.sqlite", backend_id="test")
     target_index = BackendSQLiteIndex(
-        tmp_path / ".Lethyx" / "memory.sqlite", backend_id="test", workspace_id=_WORKSPACE
+        tmp_path / ".UM-MEM" / "memory.sqlite", backend_id="test", workspace_id=_WORKSPACE
     )
     try:
         leaf = _seed(source_index)

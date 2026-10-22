@@ -1,26 +1,26 @@
-from filelock import FileLock
-from pathlib import Path
 import threading
+from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
 
 import pytest
+from filelock import FileLock
 
-from lethyx import api
-from lethyx.api import MemoryClient
-from lethyx.llm_budget import estimate_tokens
-from lethyx.memory.authoring.models import MemoryRouteDecision, MemoryWriteProposal
-from lethyx.memory.authoring.policy import route_by_taxonomy
-from lethyx.contracts import MemoryBlockRecord, RecordBlockMembership
-from lethyx.memory.backends.contracts import CanonicalHeadReservation, MemoryIndexNode
-from lethyx.memory.backends.hindsight import HindsightBackend
-from lethyx.memory.backends.mempalace import MemPalaceBackend
-from lethyx.memory.backends.mnemosyne import MnemosyneBackend
-from lethyx.memory.backends.query_policy import record_allowed_for_query
-from lethyx.memory.backends.sqlite_index import BackendSQLiteIndex
-from lethyx.memory.blocks.catalog import compile_semantic_catalog
-from lethyx.memory.blocks.models import MemoryBlock
-from lethyx.memory.blocks.registry import load_memory_blocks
+from um_mem import api
+from um_mem.api import MemoryClient
+from um_mem.contracts import MemoryBlockRecord, RecordBlockMembership
+from um_mem.llm_budget import estimate_tokens
+from um_mem.memory.authoring.models import MemoryRouteDecision, MemoryWriteProposal
+from um_mem.memory.authoring.policy import route_by_taxonomy
+from um_mem.memory.backends.contracts import CanonicalHeadReservation, MemoryIndexNode
+from um_mem.memory.backends.hindsight import HindsightBackend
+from um_mem.memory.backends.mempalace import MemPalaceBackend
+from um_mem.memory.backends.mnemosyne import MnemosyneBackend
+from um_mem.memory.backends.query_policy import record_allowed_for_query
+from um_mem.memory.backends.sqlite_index import BackendSQLiteIndex
+from um_mem.memory.blocks.catalog import compile_semantic_catalog
+from um_mem.memory.blocks.models import MemoryBlock
+from um_mem.memory.blocks.registry import load_memory_blocks
 
 
 def _logical_block(block_id: str, **overrides: Any) -> MemoryBlock:
@@ -85,7 +85,7 @@ def _write(**overrides: Any) -> MemoryWriteProposal:
 
 
 def test_registry_rejects_missing_hierarchy_references(tmp_path: Path) -> None:
-    config = tmp_path / ".Lethyx" / "memory" / "blocks.yaml"
+    config = tmp_path / ".UM-MEM" / "memory" / "blocks.yaml"
     config.parent.mkdir(parents=True)
     config.write_text(
         """
@@ -107,7 +107,7 @@ blocks:
 
 
 def test_registry_rejects_hierarchy_cycles(tmp_path: Path) -> None:
-    config = tmp_path / ".Lethyx" / "memory" / "blocks.yaml"
+    config = tmp_path / ".UM-MEM" / "memory" / "blocks.yaml"
     config.parent.mkdir(parents=True)
     config.write_text(
         """
@@ -476,7 +476,7 @@ def test_native_backends_exact_fetch_selected_ids_from_sidecar(
     tmp_path: Path, backend_kind: str
 ) -> None:
     if backend_kind == "hindsight":
-        from lethyx.memory.hindsight.config import HindsightConfig
+        from um_mem.memory.hindsight.config import HindsightConfig
 
         backend: Any = HindsightBackend(
             repo_root=tmp_path,

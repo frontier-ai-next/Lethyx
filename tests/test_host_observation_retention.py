@@ -2,10 +2,10 @@ from pathlib import Path
 
 import pytest
 
-from lethyx.api import MemoryClient
-from lethyx.contracts import EvidenceRef, HostObservation
-from lethyx.memory.backends.contracts import EdgeType, MemoryEdgeRecord
-from lethyx.memory.backends.sqlite_index import BackendSQLiteIndex
+from um_mem.api import MemoryClient
+from um_mem.contracts import EvidenceRef, HostObservation
+from um_mem.memory.backends.contracts import EdgeType, MemoryEdgeRecord
+from um_mem.memory.backends.sqlite_index import BackendSQLiteIndex
 
 
 @pytest.mark.parametrize(

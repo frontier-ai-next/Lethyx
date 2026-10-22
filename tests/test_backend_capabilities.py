@@ -5,11 +5,11 @@ from pathlib import Path
 
 import pytest
 
-from lethyx import BackendCapabilities, MemoryClient
-from lethyx.memory.backends.hindsight import HindsightBackend
-from lethyx.memory.backends.mempalace import MemPalaceBackend
-from lethyx.memory.backends.mnemosyne import MnemosyneBackend
-from lethyx.memory.catalog_store import BlockEvolutionTarget, BlockMergeSource
+from um_mem import BackendCapabilities, MemoryClient
+from um_mem.memory.backends.hindsight import HindsightBackend
+from um_mem.memory.backends.mempalace import MemPalaceBackend
+from um_mem.memory.backends.mnemosyne import MnemosyneBackend
+from um_mem.memory.catalog_store import BlockEvolutionTarget, BlockMergeSource
 
 
 @pytest.mark.parametrize("backend_type", [MemPalaceBackend, HindsightBackend, MnemosyneBackend])

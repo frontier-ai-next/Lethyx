@@ -1,9 +1,9 @@
 import json
 
-from lethyx.integrations.hermes_provider import UmMemMemoryProvider
-from lethyx.llm_budget import estimate_tokens
-from lethyx.memory.context_payload import PackedEvidencePayload, pack_evidence_payload
-from lethyx.memory.query_analysis import EvidenceRequirement
+from um_mem.integrations.hermes_provider import UmMemMemoryProvider
+from um_mem.llm_budget import estimate_tokens
+from um_mem.memory.context_payload import PackedEvidencePayload, pack_evidence_payload
+from um_mem.memory.query_analysis import EvidenceRequirement
 
 
 def _item(
@@ -70,7 +70,7 @@ def test_unattributed_negative_evidence_is_marked_instead_of_inheriting_query_su
 
 
 def test_large_record_query_span_preserves_supported_exact_literal_capsule_once() -> None:
-    exact_path = "src/lethyx/memory/context_payload.py"
+    exact_path = "src/um_mem/memory/context_payload.py"
     text = (
         "Architecture source card.\n"
         + ("Unrelated historical material.\n" * 180)

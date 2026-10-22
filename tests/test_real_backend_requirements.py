@@ -1,16 +1,16 @@
-from contextlib import nullcontext
 import json
-from dataclasses import replace
-from pathlib import Path
 import sqlite3
 import threading
 import time
+from contextlib import nullcontext
+from dataclasses import replace
+from pathlib import Path
 from typing import Any
 
 import pytest
 
-from lethyx.api import MemoryClient
-from lethyx.contracts import (
+from um_mem.api import MemoryClient
+from um_mem.contracts import (
     EvidenceRef,
     MemoryBlockRecord,
     OriginRef,
@@ -18,23 +18,23 @@ from lethyx.contracts import (
     RecordBlockMembership,
     TurnChildClaim,
 )
-from lethyx.memory.backends.factory import selected_memory_backend_mode
-from lethyx.memory.backends.hindsight import HindsightBackend
-from lethyx.memory.backends.mempalace import (
+from um_mem.memory.backends.factory import selected_memory_backend_mode
+from um_mem.memory.backends.hindsight import HindsightBackend
+from um_mem.memory.backends.mempalace import (
     MemPalaceBackend,
-    _record_to_native_payload,
     _native_gate_for,
+    _record_to_native_payload,
 )
-from lethyx.memory.backends.sqlite_index import BackendSQLiteIndex, WriteOutboxEntry
-from lethyx.memory.backends.mnemosyne import MnemosyneBackend
-from lethyx.memory.blocks.catalog import compile_semantic_catalog
-from lethyx.memory.blocks.registry import load_memory_blocks
-from lethyx.memory.catalog_store import BlockEvolutionTarget
-from lethyx.memory.hindsight.config import HindsightConfig
-from lethyx.memory.hindsight.errors import HindsightUnavailableError
-from lethyx.memory.kernel.models import block_record_to_event
-from lethyx.memory.kernel.writer import _write_memory_event
-from lethyx.memory.mutation import plan_memory_mutation
+from um_mem.memory.backends.mnemosyne import MnemosyneBackend
+from um_mem.memory.backends.sqlite_index import BackendSQLiteIndex, WriteOutboxEntry
+from um_mem.memory.blocks.catalog import compile_semantic_catalog
+from um_mem.memory.blocks.registry import load_memory_blocks
+from um_mem.memory.catalog_store import BlockEvolutionTarget
+from um_mem.memory.hindsight.config import HindsightConfig
+from um_mem.memory.hindsight.errors import HindsightUnavailableError
+from um_mem.memory.kernel.models import block_record_to_event
+from um_mem.memory.kernel.writer import _write_memory_event
+from um_mem.memory.mutation import plan_memory_mutation
 
 
 def _wait_for_projection(backend: Any, record_id: str, *, timeout: float = 5.0) -> bool:
@@ -330,25 +330,25 @@ def test_mempalace_retain_block_fails_closed_when_native_write_fails(tmp_path: P
 
 
 def test_hindsight_config_default_mode_names_hindsight(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.delenv("LETHYX_BACKEND", raising=False)
-    monkeypatch.delenv("LETHYX_MEMORY_BACKEND", raising=False)
+    monkeypatch.delenv("UM_MEM_BACKEND", raising=False)
+    monkeypatch.delenv("UM_MEM_MEMORY_BACKEND", raising=False)
 
     assert HindsightConfig.from_env().backend_mode == "hindsight"
 
-    monkeypatch.setenv("LETHYX_MEMORY_BACKEND", "hindsight")
-    with pytest.raises(ValueError, match="LETHYX_MEMORY_BACKEND"):
+    monkeypatch.setenv("UM_MEM_MEMORY_BACKEND", "hindsight")
+    with pytest.raises(ValueError, match="UM_MEM_MEMORY_BACKEND"):
         HindsightConfig.from_env()
-    with pytest.raises(ValueError, match="LETHYX_MEMORY_BACKEND"):
+    with pytest.raises(ValueError, match="UM_MEM_MEMORY_BACKEND"):
         selected_memory_backend_mode()
 
 
 def test_hindsight_retain_defaults_to_sync_for_immediate_recall(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    monkeypatch.delenv("LETHYX_HINDSIGHT_RETAIN_ASYNC", raising=False)
+    monkeypatch.delenv("UM_MEM_HINDSIGHT_RETAIN_ASYNC", raising=False)
     assert HindsightConfig.from_env().retain_async is False
 
-    monkeypatch.setenv("LETHYX_HINDSIGHT_RETAIN_ASYNC", "true")
+    monkeypatch.setenv("UM_MEM_HINDSIGHT_RETAIN_ASYNC", "true")
     assert HindsightConfig.from_env().retain_async is True
 
 
@@ -642,7 +642,7 @@ def test_hindsight_pending_recovery_fails_closed_on_native_document_mismatch(
         reopened.close()
 
     index = BackendSQLiteIndex(
-        tmp_path / "workspaces" / "ws" / ".memory" / "hindsight" / "LETHYX_index.sqlite",
+        tmp_path / "workspaces" / "ws" / ".memory" / "hindsight" / "UM_MEM_index.sqlite",
         backend_id="hindsight",
         workspace_id="ws",
     )
@@ -750,7 +750,7 @@ def test_identity_mismatch_fails_pending_canonical_head_across_restarts(
         reopened.close()
     backend_name = "hindsight" if native is not None else "mnemosyne"
     index = BackendSQLiteIndex(
-        tmp_path / "workspaces" / "ws" / ".memory" / backend_name / "LETHYX_index.sqlite",
+        tmp_path / "workspaces" / "ws" / ".memory" / backend_name / "UM_MEM_index.sqlite",
         backend_id=backend_name,
         workspace_id="ws",
     )
@@ -1296,13 +1296,13 @@ def test_mnemosyne_missing_native_outbox_reference_fails_closed_after_restart(
         native_id = str(summary["id"])
         detail = partition.get(native_id)
         assert isinstance(detail, dict)
-        assert detail["source"] == "lethyx:block:project_ideas"
+        assert detail["source"] == "um_mem:block:project_ideas"
         metadata = detail.get("metadata") or detail.get("metadata_json")
         if isinstance(metadata, str):
             metadata = json.loads(metadata)
         assert isinstance(metadata, dict)
         assert metadata["block_id"] == record.block_id
-        assert metadata["source_identity"] == "lethyx:ws:mnemosyne-missing-ref"
+        assert metadata["source_identity"] == "um-mem:ws:mnemosyne-missing-ref"
         assert reopened._index.write_outbox_native_id(revision) == native_id
         assert reopened._index.write_outbox_status(record.block_id) == "committed"
         assert reopened.get_block(record.block_id) == record
@@ -1310,7 +1310,7 @@ def test_mnemosyne_missing_native_outbox_reference_fails_closed_after_restart(
         reopened.close()
 
     index = BackendSQLiteIndex(
-        tmp_path / "workspaces" / "ws" / ".memory" / "mnemosyne" / "LETHYX_index.sqlite",
+        tmp_path / "workspaces" / "ws" / ".memory" / "mnemosyne" / "UM_MEM_index.sqlite",
         backend_id="mnemosyne",
         workspace_id="ws",
     )
@@ -1362,7 +1362,7 @@ def test_mnemosyne_pending_recovery_fails_closed_on_native_content_mismatch(
         reopened.close()
 
     index = BackendSQLiteIndex(
-        tmp_path / "workspaces" / "ws" / ".memory" / "mnemosyne" / "LETHYX_index.sqlite",
+        tmp_path / "workspaces" / "ws" / ".memory" / "mnemosyne" / "UM_MEM_index.sqlite",
         backend_id="mnemosyne",
         workspace_id="ws",
     )

@@ -1,12 +1,12 @@
 import time
 from pathlib import Path
 
-from lethyx.memory.local_service import (
+from um_mem.memory.local_service import (
     LocalServiceClientPool,
     build_local_service_identity,
     shutdown_local_service_listener,
 )
-from lethyx.memory.service_scheduler import ServiceScheduler
+from um_mem.memory.service_scheduler import ServiceScheduler
 
 
 def test_listener_owned_scheduler_accepts_only_typed_host_state_and_fires_once(

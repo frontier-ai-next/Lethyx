@@ -1,22 +1,22 @@
-from dataclasses import asdict, replace
 import json
+from dataclasses import asdict, replace
 
 import pytest
 
-from lethyx import MemoryClient
-from lethyx.contracts import EvidenceResolver, VerificationReportRef, build_workspace_context
-from lethyx.contracts.ledger import (
+from um_mem import MemoryClient
+from um_mem.contracts import EvidenceResolver, VerificationReportRef, build_workspace_context
+from um_mem.contracts.ledger import (
     append_candidate_semantic_verification_ledger_event,
     append_verification_report_ledger_event,
 )
-from lethyx.memory.backends.sqlite_index import BackendSQLiteIndex
-from lethyx.memory.tribunal.models import TribunalInput
-from lethyx.memory.tribunal.runner import run_tribunal
+from um_mem.memory.backends.sqlite_index import BackendSQLiteIndex
+from um_mem.memory.tribunal.models import TribunalInput
+from um_mem.memory.tribunal.runner import run_tribunal
 
 
 def test_generic_test_report_does_not_verify_candidate_content(tmp_path) -> None:
     index = BackendSQLiteIndex(
-        tmp_path / ".Lethyx" / "memory.sqlite", backend_id="test", workspace_id="alpha"
+        tmp_path / ".UM-MEM" / "memory.sqlite", backend_id="test", workspace_id="alpha"
     )
     try:
         client = MemoryClient(tmp_path, workspace_id="alpha", backend_instance=index)
@@ -44,10 +44,10 @@ def test_generic_test_report_does_not_verify_candidate_content(tmp_path) -> None
 
 
 def test_failed_native_amend_cannot_recover_a_generic_copied_witness(tmp_path, monkeypatch):
-    from lethyx.contracts import EvidenceRef, HostObservation
-    from lethyx.memory import mcp_call, mcp_facade
-    from lethyx.memory.local_service import build_local_service_identity
-    from lethyx.memory.service_receipts import (
+    from um_mem.contracts import EvidenceRef, HostObservation
+    from um_mem.memory import mcp_call, mcp_facade
+    from um_mem.memory.local_service import build_local_service_identity
+    from um_mem.memory.service_receipts import (
         host_tool_mutation_correlation_id,
         read_committed_mutation_receipt,
     )
@@ -85,7 +85,7 @@ def test_failed_native_amend_cannot_recover_a_generic_copied_witness(tmp_path, m
                 event_kind="ambiguous",
                 raw_evidence=json.dumps(
                     {
-                        "tool": "lethyx_provider_amend",
+                        "tool": "um_mem_provider_amend",
                         "arguments": native_arguments,
                         "native_tool_call_id": "failed-call",
                         "session_id": "session-a",
@@ -150,7 +150,7 @@ def test_failed_native_amend_cannot_recover_a_generic_copied_witness(tmp_path, m
             )
             is None
         )
-        subject = mcp_facade.lethyx_verification_subject(record.block_id, record.revision_id)
+        subject = mcp_facade.um_mem_verification_subject(record.block_id, record.revision_id)
         assert subject["ok"] is True, subject
         assert subject["candidate"]["content"] == "Unrelated generic payload."
         assert subject["proposer_model_version"] == ""
@@ -216,7 +216,7 @@ def test_tribunal_does_not_classify_quoted_instructions() -> None:
 )
 def test_semantic_verification_is_exact_and_independent(tmp_path, change) -> None:
     index = BackendSQLiteIndex(
-        tmp_path / ".Lethyx" / "memory.sqlite", backend_id="test", workspace_id="alpha"
+        tmp_path / ".UM-MEM" / "memory.sqlite", backend_id="test", workspace_id="alpha"
     )
     try:
         client = MemoryClient(tmp_path, workspace_id="alpha", backend_instance=index)
@@ -267,7 +267,7 @@ def test_semantic_verification_is_exact_and_independent(tmp_path, change) -> Non
 
 def test_exact_semantic_report_can_publish_a_candidate(tmp_path) -> None:
     index = BackendSQLiteIndex(
-        tmp_path / ".Lethyx" / "memory.sqlite", backend_id="test", workspace_id="alpha"
+        tmp_path / ".UM-MEM" / "memory.sqlite", backend_id="test", workspace_id="alpha"
     )
     try:
         client = MemoryClient(tmp_path, workspace_id="alpha", backend_instance=index)
@@ -310,18 +310,18 @@ def test_publication_operation_replays_after_newer_revision_and_workspace_change
     tmp_path, candidate_semantic_report
 ) -> None:
     index = BackendSQLiteIndex(
-        tmp_path / ".Lethyx" / "memory.sqlite", backend_id="test", workspace_id="alpha"
+        tmp_path / ".UM-MEM" / "memory.sqlite", backend_id="test", workspace_id="alpha"
     )
     try:
         client = MemoryClient(tmp_path, workspace_id="alpha", backend_instance=index)
         saved = client.remember("Reviewed finding.", requested_block_id="stable_project_facts")
         source = index.get_block(saved.memory_id)
-        arguments = dict(
-            reason="publish",
-            evidence_refs=[candidate_semantic_report(client, saved.memory_id)],
-            expected_source_revision_id=source.revision_id,
-            operation_id="publication-one",
-        )
+        arguments = {
+            "reason": "publish",
+            "evidence_refs": [candidate_semantic_report(client, saved.memory_id)],
+            "expected_source_revision_id": source.revision_id,
+            "operation_id": "publication-one",
+        }
         first = client.promote(saved.memory_id, **arguments)
         retracted = client.forget(first["block_id"], reason="later retraction")
         (tmp_path / "changed.txt").write_text("new workspace version")
@@ -340,10 +340,10 @@ def test_publication_operation_replays_after_newer_revision_and_workspace_change
 def test_pending_publication_receipt_recovers_the_committed_native_write(
     tmp_path, monkeypatch, candidate_semantic_report, materialized_copy
 ) -> None:
-    from lethyx import api
+    from um_mem import api
 
     index = BackendSQLiteIndex(
-        tmp_path / ".Lethyx" / "memory.sqlite", backend_id="test", workspace_id="alpha"
+        tmp_path / ".UM-MEM" / "memory.sqlite", backend_id="test", workspace_id="alpha"
     )
     try:
         client = MemoryClient(tmp_path, workspace_id="alpha", backend_instance=index)
@@ -355,19 +355,19 @@ def test_pending_publication_receipt_recovers_the_committed_native_write(
             else "stable_project_facts",
         )
         source = index.get_block(saved.memory_id)
-        arguments = dict(
-            reason="publish",
-            evidence_refs=[
+        arguments = {
+            "reason": "publish",
+            "evidence_refs": [
                 candidate_semantic_report(
                     client,
                     saved.memory_id,
                     target_block_id="verified_lessons" if materialized_copy else "",
                 )
             ],
-            target_block_id="verified_lessons" if materialized_copy else "",
-            expected_source_revision_id=source.revision_id,
-            operation_id="publication-one",
-        )
+            "target_block_id": "verified_lessons" if materialized_copy else "",
+            "expected_source_revision_id": source.revision_id,
+            "operation_id": "publication-one",
+        }
         complete = api.complete_remember_receipt
 
         def fail_receipt(*args, **kwargs):
@@ -389,7 +389,7 @@ def test_pending_publication_receipt_recovers_the_committed_native_write(
 
 
 def test_semantic_verifier_rejects_disguised_same_model(tmp_path) -> None:
-    from lethyx.contracts import CandidateVerificationSubject
+    from um_mem.contracts import CandidateVerificationSubject
 
     subject = CandidateVerificationSubject(
         workspace_id="alpha",
@@ -422,7 +422,7 @@ def test_generic_leaf_publication_replay_keeps_the_original_verified_revision(
     tmp_path, candidate_semantic_report
 ):
     index = BackendSQLiteIndex(
-        tmp_path / ".Lethyx" / "memory.sqlite", backend_id="test", workspace_id="alpha"
+        tmp_path / ".UM-MEM" / "memory.sqlite", backend_id="test", workspace_id="alpha"
     )
     try:
         client = MemoryClient(
@@ -441,12 +441,12 @@ def test_generic_leaf_publication_replay_keeps_the_original_verified_revision(
             "Original approved payload.", requested_block_id="stable_project_facts"
         )
         report = candidate_semantic_report(client, source.memory_id, target_block_id=target)
-        arguments = dict(
-            reason="publish",
-            evidence_refs=[report],
-            expected_source_revision_id=index.get_block(source.memory_id).revision_id,
-            target_block_id=target,
-        )
+        arguments = {
+            "reason": "publish",
+            "evidence_refs": [report],
+            "expected_source_revision_id": index.get_block(source.memory_id).revision_id,
+            "target_block_id": target,
+        }
         published = client.promote(source.memory_id, operation_id="first-publication", **arguments)
         original = index.get_block(published["block_id"])
         assert original.scope == "project" and original.project_id == "project-a"
@@ -476,7 +476,7 @@ def test_generic_leaf_publication_replay_keeps_the_original_verified_revision(
 
 def test_publication_subject_rejects_scope_broader_than_signed_target(tmp_path) -> None:
     index = BackendSQLiteIndex(
-        tmp_path / ".Lethyx" / "memory.sqlite", backend_id="test", workspace_id="alpha"
+        tmp_path / ".UM-MEM" / "memory.sqlite", backend_id="test", workspace_id="alpha"
     )
     try:
         client = MemoryClient(
@@ -495,10 +495,10 @@ def test_publication_subject_rejects_scope_broader_than_signed_target(tmp_path) 
 
 
 def test_native_authorship_requires_the_exact_committed_operation(tmp_path, monkeypatch):
-    from lethyx.contracts import HostObservation
-    from lethyx.memory import mcp_call, mcp_facade
-    from lethyx.memory.local_service import build_local_service_identity
-    from lethyx.memory.service_receipts import host_tool_mutation_correlation_id
+    from um_mem.contracts import HostObservation
+    from um_mem.memory import mcp_call, mcp_facade
+    from um_mem.memory.local_service import build_local_service_identity
+    from um_mem.memory.service_receipts import host_tool_mutation_correlation_id
 
     index = BackendSQLiteIndex(
         tmp_path / "index.sqlite", backend_id="mempalace", workspace_id="alpha"
@@ -524,7 +524,7 @@ def test_native_authorship_requires_the_exact_committed_operation(tmp_path, monk
                 event_kind="ambiguous",
                 raw_evidence=json.dumps(
                     {
-                        "tool": "lethyx_provider_" + tool,
+                        "tool": "um_mem_provider_" + tool,
                         "arguments": arguments,
                         "native_tool_call_id": invocation,
                         "session_id": "session-a",
@@ -584,7 +584,7 @@ def test_native_authorship_requires_the_exact_committed_operation(tmp_path, monk
         return index.get_block(identifier)
 
     def author_of(record):
-        result = mcp_facade.lethyx_verification_subject(
+        result = mcp_facade.um_mem_verification_subject(
             record.block_id, record.revision_id, target_block_id="stable_project_facts"
         )
         assert result["ok"] is True, result
@@ -652,8 +652,9 @@ def test_published_candidate_assurance_is_bound_on_read(
     tmp_path, candidate_semantic_report, corrupt
 ):
     from copy import deepcopy
-    from lethyx.memory.backends.contracts import block_record_to_memory_hit
-    from lethyx.memory.context_payload import project_memory_assurance
+
+    from um_mem.memory.backends.contracts import block_record_to_memory_hit
+    from um_mem.memory.context_payload import project_memory_assurance
 
     index = BackendSQLiteIndex(tmp_path / "index.sqlite", backend_id="test", workspace_id="alpha")
     try:
@@ -693,8 +694,8 @@ def test_published_candidate_assurance_is_bound_on_read(
 @pytest.mark.parametrize("scope", ["project", "user_global", "session", "task", "subtask"])
 @pytest.mark.parametrize("copy_to_leaf", [False, True])
 def test_publication_binds_destination_scope_identity(tmp_path, scope, copy_to_leaf):
-    from lethyx.memory.backends.contracts import block_record_to_memory_hit
-    from lethyx.memory.context_payload import project_memory_assurance
+    from um_mem.memory.backends.contracts import block_record_to_memory_hit
+    from um_mem.memory.context_payload import project_memory_assurance
 
     index = BackendSQLiteIndex(tmp_path / "index.sqlite", backend_id="test", workspace_id="alpha")
     try:

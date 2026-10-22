@@ -1,6 +1,6 @@
 import json
 
-from lethyx.integrations.hermes_provider import UmMemMemoryProvider
+from um_mem.integrations.hermes_provider import UmMemMemoryProvider
 
 
 def test_compact_recall_preserves_retryable_failure_without_claiming_empty_memory():

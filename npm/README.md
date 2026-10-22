@@ -1,6 +1,6 @@
-# @lethyx/cli
+# @um-mem/cli
 
-A small npm launcher for [Lethyx](https://github.com/frontier-ai-next/Lethyx), a
+A small npm launcher for [UM-MEM](https://github.com/frontier-ai-next/UM-MEM), a
 local, framework-neutral memory layer for agent harnesses.
 
 The npm package itself contains no memory engine. It gives you one entry point
@@ -9,55 +9,55 @@ and installs the Python engine into an isolated environment.
 ## Install
 
 ```console
-npm install -g @lethyx/cli
-lethyx install
-lethyx setup
+npm install -g @um-mem/cli
+um-memory install
+um-memory setup
 ```
 
 Requirements: Node 18+ and Python 3.12+.
 
-`lethyx install` creates `~/.lethyx/python` and runs
-`pip install "lethyx[mcp]"`. Add the optional multilingual embedding tier with:
+`um-memory install` creates `~/.um-mem/python` and runs
+`pip install "um-mem[mcp]"`. Add the optional multilingual embedding tier with:
 
 ```console
-lethyx install --semantic
+um-memory install --semantic
 ```
 
 The model is downloaded on first use, not during installation. Set
-`LETHYX_PIP_SPEC` to install a specific build, for example from a checkout or a
+`UM_MEM_PIP_SPEC` to install a specific build, for example from a checkout or a
 Git branch:
 
 ```console
-$env:LETHYX_PIP_SPEC = "lethyx[mcp,semantic] @ git+https://github.com/frontier-ai-next/Lethyx.git@main"
-lethyx install --force
+$env:UM_MEM_PIP_SPEC = "um-mem[mcp,semantic] @ git+https://github.com/frontier-ai-next/UM-MEM.git@main"
+um-memory install --force
 ```
 
-On macOS/Linux use `export LETHYX_PIP_SPEC=...`.
+On macOS/Linux use `export UM_MEM_PIP_SPEC=...`.
 
 Until the package is published, install the launcher from a checkout:
 
 ```console
 npm install -g .\npm
-lethyx install --from .
+um-memory install --from .
 ```
 
 ## After install
 
 ```console
-lethyx setup        guided backend, store, harness and embedding choices
-lethyx status       show the active configuration
-lethyx doctor       check the store, backend and MCP runtime
-lethyx map          render and open the memory map
+um-memory setup        guided backend, store, harness and embedding choices
+um-memory status       show the active configuration
+um-memory doctor       check the store, backend and MCP runtime
+um-memory map          render and open the memory map
 ```
 
-`lethyx setup` writes `~/.lethyx/config.json` and updates the MCP settings of
+`um-memory setup` writes `~/.um-mem/config.json` and updates the MCP settings of
 the harness you choose. Restart the harness afterwards.
 
 ## Uninstall
 
 ```console
-npm uninstall -g @lethyx/cli
+npm uninstall -g @um-mem/cli
 ```
 
-The Python environment and memory store live in `~/.lethyx`; remove that folder
+The Python environment and memory store live in `~/.um-mem`; remove that folder
 only if you also want to delete your local memory.

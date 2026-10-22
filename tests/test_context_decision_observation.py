@@ -4,11 +4,10 @@ from pathlib import Path
 
 import pytest
 
-import lethyx.api as api
-from lethyx import MemoryClient
-from lethyx.memory.blocks.catalog import compile_semantic_catalog
-from lethyx.memory.blocks.registry import load_memory_blocks
-from lethyx.memory.kernel.telemetry import read_memory_events
+from um_mem import MemoryClient, api
+from um_mem.memory.blocks.catalog import compile_semantic_catalog
+from um_mem.memory.blocks.registry import load_memory_blocks
+from um_mem.memory.kernel.telemetry import read_memory_events
 
 
 def test_context_decision_has_measured_latency_current_catalog_and_exact_link(

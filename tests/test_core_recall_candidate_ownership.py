@@ -3,9 +3,9 @@ from typing import Any
 
 import pytest
 
-from lethyx.api import MemoryClient
-from lethyx.contracts import EvidenceRef, MemoryBlockRecord, RecordBlockMembership
-from lethyx.memory.backends.contracts import block_record_to_memory_hit
+from um_mem.api import MemoryClient
+from um_mem.contracts import EvidenceRef, MemoryBlockRecord, RecordBlockMembership
+from um_mem.memory.backends.contracts import block_record_to_memory_hit
 
 
 def _record(

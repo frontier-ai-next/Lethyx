@@ -1,5 +1,5 @@
-from lethyx.memory.query_analysis import EvidenceRequirement
-from lethyx.memory.recall_plan import RecallPlan
+from um_mem.memory.query_analysis import EvidenceRequirement
+from um_mem.memory.recall_plan import RecallPlan
 
 
 def test_semantic_synthesis_query_does_not_compile_subjects_facets_or_roles() -> None:

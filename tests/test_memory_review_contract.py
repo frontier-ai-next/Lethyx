@@ -1,6 +1,6 @@
 import pytest
 
-from lethyx.contracts import MemoryReviewDecision, MemoryReviewReceipt
+from um_mem.contracts import MemoryReviewDecision, MemoryReviewReceipt
 
 
 def _decision(**overrides: object) -> MemoryReviewDecision:

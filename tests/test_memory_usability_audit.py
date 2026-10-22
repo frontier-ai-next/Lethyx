@@ -3,17 +3,16 @@
 from __future__ import annotations
 
 import dataclasses
-import importlib.util
 import json
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
 
-from lethyx.api import MemoryClient
-from lethyx.contracts.memory import EvidenceRef, MemoryBlockRecord, RecordBlockMembership
-from lethyx.memory import mcp_server
-from lethyx.memory.backends.mnemosyne import MnemosyneBackend
-from lethyx.memory.mcp_compact import compact_response
+from um_mem.api import MemoryClient
+from um_mem.contracts.memory import EvidenceRef, MemoryBlockRecord, RecordBlockMembership
+from um_mem.memory import mcp_server
+from um_mem.memory.backends.mnemosyne import MnemosyneBackend
+from um_mem.memory.mcp_compact import compact_response
 
 
 def _native_record(block_id: str) -> MemoryBlockRecord:
@@ -126,6 +125,7 @@ def test_mnemosyne_recall_ignores_memoria_supplement_rows(tmp_path) -> None:
     )
     assert {row.block_id for row in recalled} == {record.block_id}
 
+
 _RECORDS = [
     {
         "block_id": "mem_config",
@@ -159,7 +159,7 @@ _RECORDS = [
 
 
 def _fake_recent(*_args: object, **_kwargs: object) -> dict[str, object]:
-    return {"ok": True, "records": _RECORDS}
+    return {"ok": True, "records": _RECORDS, "hits": [{"source": r["block_id"]} for r in _RECORDS]}
 
 
 def test_recall_fallback_recovers_from_native_backend_error(monkeypatch) -> None:
@@ -227,7 +227,7 @@ def test_build_context_fallback_can_render_packed_context(monkeypatch) -> None:
     )
 
     rendered = result["rendered_context"]
-    assert "Lethyx recalled context" in rendered
+    assert "UM-MEM recalled context" in rendered
     assert "The Python environment uses uv" in rendered
 
 
@@ -267,9 +267,9 @@ def test_fallback_respects_explicit_tags_and_skips_nondurable_horizons(monkeypat
 def test_recall_honors_tags_even_when_the_native_backend_ignores_them(
     tmp_path: Path,
 ) -> None:
-    from lethyx.api import _hit_allowed
-    from lethyx.memory.backends.contracts import block_record_to_memory_hit
-    from lethyx.memory.recall_plan import RecallPlan
+    from um_mem.api import _hit_allowed
+    from um_mem.memory.backends.contracts import block_record_to_memory_hit
+    from um_mem.memory.recall_plan import RecallPlan
 
     client = MemoryClient(tmp_path, workspace_id="tags-audit", backend="mnemosyne")
     root = client.block_map()[0]
@@ -304,7 +304,7 @@ def test_recall_honors_tags_even_when_the_native_backend_ignores_them(
 
 
 def test_compact_failed_remember_keeps_route_repair_instructions(monkeypatch) -> None:
-    monkeypatch.setenv("LETHYX_MCP_RESPONSE_MODE", "compact")
+    monkeypatch.setenv("UM_MEM_MCP_RESPONSE_MODE", "compact")
     result = compact_response(
         "remember",
         {
@@ -334,8 +334,39 @@ def test_compact_failed_remember_keeps_route_repair_instructions(monkeypatch) ->
     assert result["policy_issues"] == ["index-only blocks cannot hold records"]
 
 
+def test_compact_recall_keeps_the_score_scale(monkeypatch) -> None:
+    monkeypatch.setenv("UM_MEM_MCP_RESPONSE_MODE", "compact")
+    result = compact_response(
+        "recall",
+        {
+            "ok": True,
+            "hits": [
+                {
+                    "record_id": "mem_lexical",
+                    "title": "Lexical",
+                    "text": "lexical hit",
+                    "score": 1,
+                    "score_mode": "relative_lexical_ngram",
+                },
+                {
+                    "record_id": "mem_native",
+                    "title": "Native",
+                    "text": "native hit",
+                    "score": 0.71,
+                    "metadata": {"native_score_mode": "cosine_similarity"},
+                },
+            ],
+        },
+    )
+
+    assert [item["score_mode"] for item in result["items"]] == [
+        "relative_lexical_ngram",
+        "cosine_similarity",
+    ]
+
+
 def test_local_service_route_receipt_keeps_route_decision() -> None:
-    from lethyx.memory.mcp_call import _compact_remember_receipt
+    from um_mem.memory.mcp_call import _compact_remember_receipt
 
     receipt = _compact_remember_receipt(
         {
@@ -360,15 +391,13 @@ def test_local_service_route_receipt_keeps_route_decision() -> None:
         }
     )
 
-    assert receipt["route_decision"]["policy_issues"] == [
-        "index_only_not_record_storage"
-    ]
+    assert receipt["route_decision"]["policy_issues"] == ["index_only_not_record_storage"]
     assert receipt["route_decision"]["suggested_block_id"] == "decisions_and_contracts"
     assert receipt["suggested_route"]["requested_block_id"] == "decisions_and_contracts"
 
 
 def test_compact_exact_read_derives_record_and_logical_block_ids(monkeypatch) -> None:
-    monkeypatch.setenv("LETHYX_MCP_RESPONSE_MODE", "compact")
+    monkeypatch.setenv("UM_MEM_MCP_RESPONSE_MODE", "compact")
     result = compact_response(
         "read_exact_record",
         {
@@ -388,7 +417,7 @@ def test_compact_exact_read_derives_record_and_logical_block_ids(monkeypatch) ->
 
 
 def test_navigation_envelope_projection_drops_raw_provider_diagnostics(monkeypatch) -> None:
-    monkeypatch.setenv("LETHYX_MCP_RESPONSE_MODE", "compact")
+    monkeypatch.setenv("UM_MEM_MCP_RESPONSE_MODE", "compact")
     raw = {
         "ok": True,
         "workspace_id": "opencode",
@@ -421,9 +450,7 @@ def test_navigation_envelope_projection_drops_raw_provider_diagnostics(monkeypat
     assert "native_partitions" not in compact["block"]
     assert "metrics" not in compact["block"]
     assert compact["related_block_ids"] == ["other"]
-    assert len(json.dumps(compact, ensure_ascii=False)) < len(
-        json.dumps(raw, ensure_ascii=False)
-    )
+    assert len(json.dumps(compact, ensure_ascii=False)) < len(json.dumps(raw, ensure_ascii=False))
 
 
 def test_block_map_can_expose_the_protected_meta_tree(tmp_path: Path) -> None:
@@ -445,8 +472,7 @@ def test_block_map_can_expose_the_protected_meta_tree(tmp_path: Path) -> None:
     assert meta_root["meta"] is True
     assert meta_root["node_kind"] == "meta"
     assert any(
-        item["block_id"] == "decisions_and_contracts" and item["meta"] is True
-        for item in blocks
+        item["block_id"] == "decisions_and_contracts" and item["meta"] is True for item in blocks
     )
 
     expanded = client.expand_block("decisions_and_contracts")
@@ -497,10 +523,8 @@ def test_delete_block_reports_records_then_cascade_removes_them(tmp_path: Path) 
     assert second["records_remaining"] == 0
 
 
-def test_amend_and_exact_read_expose_stable_record_ids(
-    monkeypatch, tmp_path: Path
-) -> None:
-    monkeypatch.setenv("LETHYX_MCP_RESPONSE_MODE", "compact")
+def test_amend_and_exact_read_expose_stable_record_ids(monkeypatch, tmp_path: Path) -> None:
+    monkeypatch.setenv("UM_MEM_MCP_RESPONSE_MODE", "compact")
     client = MemoryClient(tmp_path, workspace_id="amend-audit", backend="mnemosyne")
     root = client.block_map()[0]
     leaf = client.create_leaf_block(
@@ -534,28 +558,32 @@ def test_amend_and_exact_read_expose_stable_record_ids(
     assert compact_read["record"]["logical_block_id"] == leaf["block_id"]
 
 
-def test_active_recall_helper_uses_universal_fallback_when_native_recall_raises() -> None:
-    path = Path(__file__).resolve().parents[2] / "bin" / "lethyx-context.py"
-    spec = importlib.util.spec_from_file_location("lethyx_context_audit", path)
-    assert spec is not None and spec.loader is not None
-    module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
-
-    class Client:
-        def recall(self, *_args: object, **_kwargs: object) -> list[object]:
-            raise ValueError("mnemosyne native recall detail is missing")
-
-        def recent_records(self, **_kwargs: object) -> list[object]:
-            return [
-                SimpleNamespace(
-                    block_id="mem_helper",
-                    title="OpenCode config",
-                    content="OpenCode config is in the global config directory.",
-                    tags=["opencode", "config"],
-                    recorded_at="2026-10-20T00:00:00Z",
-                )
-            ]
-
-    evidence = module._recall(Client(), "where is the opencode config", 3, "run", "opencode")
-    assert evidence[0]["record_id"] == "mem_helper"
-    assert "OpenCode config" in evidence[0]["text"]
+def test_mcp_fallback_cannot_admit_unvalidated_recent_records(monkeypatch, tmp_path) -> None:
+    monkeypatch.setenv("UM_MEM_SEMANTIC", "0")
+    monkeypatch.setattr(
+        mcp_server,
+        "_service_call",
+        lambda *args, **kwargs: {
+            "ok": True,
+            "records": [
+                {
+                    "record_id": "mem_helper",
+                    "title": "OpenCode config",
+                    "content": "OpenCode config is in the global config directory.",
+                    "status": "accepted",
+                    "expires_at": "2000-01-01T00:00:00Z",
+                    "tags": ["opencode", "config"],
+                }
+            ],
+            "hits": [],
+        },
+    )
+    result = mcp_server._apply_recall_fallback(
+        SimpleNamespace(repo_root=tmp_path, workspace_id="ws"),
+        None,
+        "recall",
+        {"query": "where is the opencode config", "limit": 3, "include_candidates": True},
+        {"ok": False, "error": "native recall detail is missing", "hits": []},
+    )
+    assert result["hits"] == []
+    assert result["ok"] is False

@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from lethyx.memory import memory_map
+from um_mem.memory import memory_map
 
 _DATA = {
     "workspace_id": "opencode",
@@ -47,7 +47,7 @@ _DATA = {
             "title": "Restart the local service",
             "content": "Restart after editing the source.",
             "kind": "procedure",
-            "tags": ["lethyx"],
+            "tags": ["um-mem"],
             "status": "candidate",
             "recorded_at": "2026-10-21T00:00:00Z",
             "block": "leaf",
@@ -69,7 +69,7 @@ _DATA = {
 def test_memory_graph_renders_one_self_contained_page() -> None:
     page = memory_map.render_memory_map(_DATA)
     assert page.startswith("<!doctype html>")
-    assert "Lethyx memory graph" in page
+    assert "UM-MEM memory graph" in page
     assert "OpenCode config locations" in page
     assert "Restart the local service" in page
     assert "edit the source" in page
@@ -80,8 +80,8 @@ def test_memory_graph_renders_one_self_contained_page() -> None:
     assert "node.subtext" in page
     assert "data-reset" in page
     # The page must work offline: no external stylesheet, script or image.
-    assert "src=\"http" not in page
-    assert "href=\"http" not in page
+    assert 'src="http' not in page
+    assert 'href="http' not in page
     assert "@import" not in page
 
 

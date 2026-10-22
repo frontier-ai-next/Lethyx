@@ -1,9 +1,9 @@
-from pathlib import Path
 import threading
+from pathlib import Path
 
-from lethyx.contracts import EvidenceRef, MemoryBlockRecord, RecordBlockMembership
-from lethyx.memory.backends.mempalace import MemPalaceBackend, _native_gate_for
-from lethyx.memory.backends.sqlite_index import BackendSQLiteIndex
+from um_mem.contracts import EvidenceRef, MemoryBlockRecord, RecordBlockMembership
+from um_mem.memory.backends.mempalace import MemPalaceBackend, _native_gate_for
+from um_mem.memory.backends.sqlite_index import BackendSQLiteIndex
 
 
 def _record(

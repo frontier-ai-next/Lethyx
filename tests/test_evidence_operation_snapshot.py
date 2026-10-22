@@ -1,9 +1,8 @@
 from pathlib import Path
 
-from lethyx.contracts import EvidenceResolver, build_workspace_context
-from lethyx.contracts import evidence
-from lethyx.contracts.hashing import SKIP_DIRS, file_sha256, hash_value, workspace_hash
-from lethyx.contracts.ledger import append_verification_report_ledger_event
+from um_mem.contracts import EvidenceResolver, build_workspace_context, evidence
+from um_mem.contracts.hashing import SKIP_DIRS, file_sha256, hash_value, workspace_hash
+from um_mem.contracts.ledger import append_verification_report_ledger_event
 
 
 def test_evidence_resolver_reads_one_operation_snapshot(tmp_path, monkeypatch) -> None:
@@ -59,5 +58,6 @@ def test_workspace_hash_preserves_manifest_and_prunes_excluded_trees(tmp_path, m
     def reject_rglob(*args, **kwargs):
         raise AssertionError("must prune directories before traversal")
 
-    monkeypatch.setattr(Path, "rglob", reject_rglob)
-    assert workspace_hash(tmp_path) == expected
+    with monkeypatch.context() as patch:
+        patch.setattr(Path, "rglob", reject_rglob)
+        assert workspace_hash(tmp_path) == expected

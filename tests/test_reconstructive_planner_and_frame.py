@@ -2,12 +2,11 @@ from dataclasses import replace
 
 import pytest
 
-from lethyx.contracts import RecallFrame
-from lethyx.memory.backends.contracts import EdgeType, MemoryEdgeRecord, MemoryIndexNode
-from lethyx.memory.recall_plan import RecallPlan
-from lethyx.memory.recall_strategy import compile_reconstructive_strategy
-from lethyx.memory.reconstructive_recall import pin_recall_frame
-
+from um_mem.contracts import RecallFrame
+from um_mem.memory.backends.contracts import EdgeType, MemoryEdgeRecord, MemoryIndexNode
+from um_mem.memory.recall_plan import RecallPlan
+from um_mem.memory.recall_strategy import compile_reconstructive_strategy
+from um_mem.memory.reconstructive_recall import pin_recall_frame
 
 _QUERY = "How did ReleasePlanner decision procedure change src/api.py before release?"
 
@@ -213,7 +212,7 @@ def test_operator_candidates_come_only_from_canonical_index_records_and_edges() 
         "record-procedure",
     }
 
-    assert set(candidate for step in plan.steps for candidate in step.candidate_ids) <= known
+    assert {candidate for step in plan.steps for candidate in step.candidate_ids} <= known
     assert all(
         not candidate.endswith("-node") for step in plan.steps for candidate in step.candidate_ids
     )

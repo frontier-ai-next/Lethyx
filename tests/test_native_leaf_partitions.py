@@ -7,11 +7,11 @@ from typing import Any
 import pytest
 from chromadb.errors import InternalError as ChromaInternalError
 
-from lethyx.contracts import EvidenceRef, MemoryBlockRecord, RecordBlockMembership
-from lethyx.memory.backends.contracts import NativePartitionIdentity, block_from_json
-from lethyx.memory.backends.hindsight import HindsightBackend
-from lethyx.memory.backends.mempalace import MemPalaceBackend, _NativeMemPalace
-from lethyx.memory.backends.mnemosyne import MnemosyneBackend
+from um_mem.contracts import EvidenceRef, MemoryBlockRecord, RecordBlockMembership
+from um_mem.memory.backends.contracts import NativePartitionIdentity, block_from_json
+from um_mem.memory.backends.hindsight import HindsightBackend
+from um_mem.memory.backends.mempalace import MemPalaceBackend, _NativeMemPalace
+from um_mem.memory.backends.mnemosyne import MnemosyneBackend
 
 
 def _record(
@@ -372,7 +372,7 @@ def test_mempalace_scoped_recall_reads_only_selected_native_collection_family(
 ) -> None:
     fake_backend = _FakeChromaBackend()
     monkeypatch.setattr(
-        "lethyx.memory.backends.mempalace.ChromaBackend",
+        "um_mem.memory.backends.mempalace.ChromaBackend",
         lambda: fake_backend,
     )
     native = _NativeMemPalace(tmp_path, "workspace-alpha")
@@ -410,7 +410,7 @@ def test_current_recall_opens_only_partitions_with_eligible_records(
     tmp_path: Path,
 ) -> None:
     native = _FakeChromaBackend()
-    monkeypatch.setattr("lethyx.memory.backends.mempalace.ChromaBackend", lambda: native)
+    monkeypatch.setattr("um_mem.memory.backends.mempalace.ChromaBackend", lambda: native)
     backend = MemPalaceBackend(tmp_path, workspace_id="workspace-alpha")
     candidate = replace(_record("candidate", "project_ideas"), status="candidate")
     retired = replace(
@@ -457,7 +457,7 @@ def test_mempalace_scoped_recall_skips_stores_absent_from_the_canonical_partitio
 ) -> None:
     fake_backend = _FakeChromaBackend()
     monkeypatch.setattr(
-        "lethyx.memory.backends.mempalace.ChromaBackend",
+        "um_mem.memory.backends.mempalace.ChromaBackend",
         lambda: fake_backend,
     )
     native = _NativeMemPalace(tmp_path, "workspace-alpha")
@@ -532,7 +532,7 @@ def test_mempalace_reopens_once_for_transient_missing_hnsw_reader(
         return backend
 
     monkeypatch.setattr(
-        "lethyx.memory.backends.mempalace.ChromaBackend",
+        "um_mem.memory.backends.mempalace.ChromaBackend",
         backend_factory,
     )
     native = _NativeMemPalace(tmp_path, "workspace-alpha")
@@ -615,7 +615,7 @@ def test_mempalace_rebuilds_one_persistently_missing_hnsw_collection(
         return backend
 
     monkeypatch.setattr(
-        "lethyx.memory.backends.mempalace.ChromaBackend",
+        "um_mem.memory.backends.mempalace.ChromaBackend",
         backend_factory,
     )
     native = _NativeMemPalace(tmp_path, "workspace-alpha")
@@ -707,7 +707,7 @@ def test_mempalace_repairs_missing_hnsw_reader_raised_while_counting(
         return backend
 
     monkeypatch.setattr(
-        "lethyx.memory.backends.mempalace.ChromaBackend",
+        "um_mem.memory.backends.mempalace.ChromaBackend",
         backend_factory,
     )
     native = _NativeMemPalace(tmp_path, "workspace-alpha")

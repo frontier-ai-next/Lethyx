@@ -2,7 +2,7 @@ from dataclasses import replace
 
 import pytest
 
-from lethyx.contracts import EvidenceRef, OutcomeCreditEvent
+from um_mem.contracts import EvidenceRef, OutcomeCreditEvent
 
 
 def _neutral(reason: str) -> OutcomeCreditEvent:

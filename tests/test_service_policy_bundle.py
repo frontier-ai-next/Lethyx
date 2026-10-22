@@ -4,7 +4,7 @@ from dataclasses import replace
 
 import pytest
 
-from lethyx.memory.service_policy import (
+from um_mem.memory.service_policy import (
     ServicePolicyBundleStore,
     baseline_memory_policy_bundle,
 )
@@ -56,22 +56,22 @@ def test_initialize_pins_explicit_baseline_and_hides_raw_session(tmp_path) -> No
 
     assert pinned == bundle
     assert pinned.catalog_revision_id.startswith(
-        "catalog:lethyx.memory.blocks.registry.load_memory_blocks@1:sha256:"
+        "catalog:um_mem.memory.blocks.registry.load_memory_blocks@1:sha256:"
     )
     assert pinned.activation_revision_id == (
-        "activation:lethyx.memory.selection.MemorySelectionPolicy.eligible_for_overlay@1"
+        "activation:um_mem.memory.selection.MemorySelectionPolicy.eligible_for_overlay@1"
     )
     assert pinned.working_context_revision_id == (
-        "working_context:lethyx.memory.working_continuity.compile_continuation_packet@1"
+        "working_context:um_mem.memory.working_continuity.compile_continuation_packet@1"
     )
     assert pinned.recall_operator_revision_id == (
-        "recall_operator:lethyx.memory.recall_plan.RecallPlan.compile@2"
+        "recall_operator:um_mem.memory.recall_plan.RecallPlan.compile@2"
     )
     assert pinned.consolidation_revision_id == (
-        "consolidation:lethyx.memory.consolidation.CanonicalConsolidationPipeline.propose@1"
+        "consolidation:um_mem.memory.consolidation.CanonicalConsolidationPipeline.propose@1"
     )
     assert pinned.prospective_policy_revision_id == (
-        "prospective:lethyx.memory.prospective.evaluate_prospective_trigger@1"
+        "prospective:um_mem.memory.prospective.evaluate_prospective_trigger@1"
     )
     assert store.snapshot_for(pinned.revision_id) == snapshot
 
@@ -84,7 +84,7 @@ def test_activation_receipt_is_idempotent_for_caller_activation_id(tmp_path) -> 
     store, bundle, snapshot = _store(tmp_path)
     candidate = replace(
         bundle,
-        consolidation_revision_id="consolidation:lethyx.memory.consolidation.CanonicalConsolidationPipeline.propose@2",
+        consolidation_revision_id="consolidation:um_mem.memory.consolidation.CanonicalConsolidationPipeline.propose@2",
     )
 
     first = store.activate(
@@ -113,7 +113,7 @@ def test_rejected_catalog_activation_keeps_last_known_good_pointer(tmp_path) -> 
     candidate = replace(
         baseline,
         catalog_revision_id=(
-            "catalog:lethyx.memory.blocks.registry.load_memory_blocks@1:sha256:" + "0" * 64
+            "catalog:um_mem.memory.blocks.registry.load_memory_blocks@1:sha256:" + "0" * 64
         ),
     )
 
@@ -135,7 +135,7 @@ def test_reload_preserves_session_pin_and_recovers_active_from_lkg(tmp_path) -> 
     assert store.pin_session("stable-session") == baseline
     candidate = replace(
         baseline,
-        prospective_policy_revision_id="prospective:lethyx.memory.prospective.evaluate_prospective_trigger@2",
+        prospective_policy_revision_id="prospective:um_mem.memory.prospective.evaluate_prospective_trigger@2",
     )
     assert store.activate(
         candidate, activation_id="activate-prospective", catalog_snapshot=snapshot

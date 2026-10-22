@@ -2,7 +2,7 @@ from dataclasses import replace
 
 import pytest
 
-from lethyx.integrations import (
+from um_mem.integrations import (
     HostCapabilityManifest,
     MemoryServiceCapabilities,
     negotiate_runtime,

@@ -2,9 +2,9 @@ import threading
 import time
 from datetime import UTC, datetime, timedelta
 
-from lethyx.memory import mcp_call
-from lethyx.memory.local_service import build_local_service_identity
-from lethyx.memory.service_work_queue import (
+from um_mem.memory import mcp_call
+from um_mem.memory.local_service import build_local_service_identity
+from um_mem.memory.service_work_queue import (
     DEFAULT_LANE_POLICIES,
     DurableServiceWorkQueue,
     ServiceQueueWorker,

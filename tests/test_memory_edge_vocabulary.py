@@ -1,4 +1,4 @@
-from lethyx.memory.backends.contracts import ALLOWED_EDGE_TYPES, EdgeType, MemoryEdgeRecord
+from um_mem.memory.backends.contracts import ALLOWED_EDGE_TYPES, EdgeType, MemoryEdgeRecord
 
 
 def test_graph_edge_vocabulary_is_allowed_by_backend_contract() -> None:

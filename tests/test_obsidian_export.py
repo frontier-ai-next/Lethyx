@@ -1,10 +1,9 @@
 from pathlib import Path
 
-from lethyx.contracts import EvidenceRef
-from lethyx.memory import cli
-from lethyx.contracts import MemoryBlockRecord
-from lethyx.memory.backends.contracts import MemoryEdgeRecord
-from lethyx.memory.obsidian_export import export_records_to_obsidian, note_name_for_block
+from um_mem.contracts import EvidenceRef, MemoryBlockRecord
+from um_mem.memory import cli
+from um_mem.memory.backends.contracts import MemoryEdgeRecord
+from um_mem.memory.obsidian_export import export_records_to_obsidian, note_name_for_block
 
 
 def _block(
@@ -75,7 +74,7 @@ def test_obsidian_export_writes_project_index_notes_and_graph_links(tmp_path: Pa
         project_title="Demo Project",
     )
 
-    assert result.index_path == tmp_path / "Lethyx" / "Projects" / "demo" / "Index.md"
+    assert result.index_path == tmp_path / "UM-MEM" / "Projects" / "demo" / "Index.md"
     assert result.index_path.exists()
     assert result.memory_overview_path.exists()
 
@@ -101,12 +100,12 @@ def test_obsidian_export_writes_project_index_notes_and_graph_links(tmp_path: Pa
     assert "[[Scoped Recall - mem-a]]" not in index_text
 
     core_index_text = (
-        tmp_path / "Lethyx" / "Projects" / "demo" / "Core" / "Core Index.md"
+        tmp_path / "UM-MEM" / "Projects" / "demo" / "Core" / "Core Index.md"
     ).read_text(encoding="utf-8")
     assert "[[Core/Project knowledge/Project knowledge Index|Project knowledge]]" in core_index_text
     area_hub_text = (
         tmp_path
-        / "Lethyx"
+        / "UM-MEM"
         / "Projects"
         / "demo"
         / "Core"
@@ -145,7 +144,7 @@ def test_obsidian_export_is_workspace_scoped_by_default(tmp_path: Path) -> None:
     text = result.index_path.read_text(encoding="utf-8")
     assert "Demo workspace memory." in (
         tmp_path
-        / "Lethyx"
+        / "UM-MEM"
         / "Projects"
         / "demo"
         / "Core"
@@ -174,23 +173,23 @@ def test_obsidian_export_keeps_session_evidence_out_of_core_memory_tree(tmp_path
     )
 
     assert set(result.block_paths) == {"core-rule"}
-    assert not (tmp_path / "Lethyx" / "Projects" / "demo" / "Core" / "Session summaries").exists()
+    assert not (tmp_path / "UM-MEM" / "Projects" / "demo" / "Core" / "Session summaries").exists()
     index_text = result.index_path.read_text(encoding="utf-8")
     assert "Core memory blocks: **1**" in index_text
     assert "Evidence/archive blocks kept in backend: **1**" in index_text
-    archive_text = (tmp_path / "Lethyx" / "Projects" / "demo" / "Evidence Archive.md").read_text(
+    archive_text = (tmp_path / "UM-MEM" / "Projects" / "demo" / "Evidence Archive.md").read_text(
         encoding="utf-8"
     )
     assert "[[Evidence/Evidence Index|Evidence Index]]" in archive_text
     assert "[[Session Summary - session_summary_20260627_210403_045200]]" not in archive_text
 
     evidence_index_text = (
-        tmp_path / "Lethyx" / "Projects" / "demo" / "Evidence" / "Evidence Index.md"
+        tmp_path / "UM-MEM" / "Projects" / "demo" / "Evidence" / "Evidence Index.md"
     ).read_text(encoding="utf-8")
     assert "[[Evidence/Sessions/Evidence Sessions Index|Sessions]]" in evidence_index_text
     sessions_hub_text = (
         tmp_path
-        / "Lethyx"
+        / "UM-MEM"
         / "Projects"
         / "demo"
         / "Evidence"
@@ -203,7 +202,7 @@ def test_obsidian_export_keeps_session_evidence_out_of_core_memory_tree(tmp_path
     )
     session_hub_text = (
         tmp_path
-        / "Lethyx"
+        / "UM-MEM"
         / "Projects"
         / "demo"
         / "Evidence"
@@ -216,7 +215,7 @@ def test_obsidian_export_keeps_session_evidence_out_of_core_memory_tree(tmp_path
     )
     evidence_note = (
         tmp_path
-        / "Lethyx"
+        / "UM-MEM"
         / "Projects"
         / "demo"
         / "Evidence"
@@ -254,7 +253,7 @@ def test_obsidian_export_uses_universal_evidence_categories_without_ideas_parent
         workspace_id="demo",
     )
 
-    root = tmp_path / "Lethyx" / "Projects" / "demo"
+    root = tmp_path / "UM-MEM" / "Projects" / "demo"
     assert (
         root
         / "Evidence"
@@ -268,7 +267,7 @@ def test_obsidian_export_uses_universal_evidence_categories_without_ideas_parent
 
 
 def test_obsidian_export_does_not_mutate_unowned_project_state(tmp_path: Path) -> None:
-    unowned = tmp_path / "Lethyx" / "Projects" / "demo" / ".obsidian" / "workspace.json"
+    unowned = tmp_path / "UM-MEM" / "Projects" / "demo" / ".obsidian" / "workspace.json"
     unowned.parent.mkdir(parents=True, exist_ok=True)
     unowned.write_text("{}", encoding="utf-8")
 
@@ -379,6 +378,6 @@ def test_cli_obsidian_export_writes_vault_from_selected_backend(
     )
 
     assert code == 0
-    assert (tmp_path / "vault" / "Lethyx" / "Projects" / "demo" / "Index.md").exists()
-    assert (tmp_path / "vault" / "Lethyx" / "Projects" / "demo" / "Memory Overview.md").exists()
-    assert not (tmp_path / "vault" / "Lethyx" / "Projects" / "demo" / "NotebookLM").exists()
+    assert (tmp_path / "vault" / "UM-MEM" / "Projects" / "demo" / "Index.md").exists()
+    assert (tmp_path / "vault" / "UM-MEM" / "Projects" / "demo" / "Memory Overview.md").exists()
+    assert not (tmp_path / "vault" / "UM-MEM" / "Projects" / "demo" / "NotebookLM").exists()

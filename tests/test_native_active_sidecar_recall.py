@@ -1,21 +1,22 @@
 import json
+from collections.abc import Callable
 from dataclasses import replace
 from pathlib import Path
-from typing import Any, Callable
+from typing import Any
 
 import pytest
 
-from lethyx.contracts import EvidenceRef, MemoryBlockRecord, RecordBlockMembership
-from lethyx.memory.backends.contracts import block_to_json
-from lethyx.memory.backends.hindsight import HindsightBackend
-from lethyx.memory.backends.mnemosyne import (
+from um_mem.contracts import EvidenceRef, MemoryBlockRecord, RecordBlockMembership
+from um_mem.memory.backends.contracts import block_to_json
+from um_mem.memory.backends.hindsight import HindsightBackend
+from um_mem.memory.backends.mnemosyne import (
     MNEMOSYNE_PARTITION_PROJECTION_MARKER,
     MnemosyneBackend,
 )
-from lethyx.memory.backends.query_policy import (
+from um_mem.memory.backends.query_policy import (
     NATIVE_PROJECTION_REBUILD_REQUIRED,
 )
-from lethyx.memory.hindsight.config import HindsightConfig
+from um_mem.memory.hindsight.config import HindsightConfig
 
 
 def _record(block_id: str, content: str) -> MemoryBlockRecord:
@@ -60,7 +61,7 @@ def _native_metadata(
 ) -> dict[str, Any]:
     metadata = {
         "block_id": record.block_id,
-        "source_identity": f"lethyx:{record.workspace_id}:{record.block_id}",
+        "source_identity": f"um-mem:{record.workspace_id}:{record.block_id}",
         "primary_block_id": record.block_membership.primary_block_id,
         "projection_marker": projection_marker,
         "native_partition_id": HindsightBackend._record_partition_identity(record).partition_id,
@@ -86,7 +87,7 @@ class _HindsightNative:
                 "id": self.record.block_id,
                 "text": self.record.content,
                 "score": 1.0,
-                "tags": [f"lethyx:block:{self.record.block_membership.primary_block_id}"],
+                "tags": [f"um_mem:block:{self.record.block_membership.primary_block_id}"],
                 "metadata": _native_metadata(self.record),
             }
         ]
@@ -103,7 +104,7 @@ class _MnemosyneNative:
         self.row = {
             "id": record.block_id,
             "content": MnemosyneBackend._native_expected_content(record, 1),
-            "source": f"lethyx:block:{record.block_membership.primary_block_id}",
+            "source": f"um_mem:block:{record.block_membership.primary_block_id}",
             "session_id": session_partition_id,
             "metadata": _native_metadata(
                 record,

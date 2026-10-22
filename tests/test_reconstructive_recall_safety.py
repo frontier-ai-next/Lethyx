@@ -1,19 +1,19 @@
 import pytest
 
-from lethyx.contracts import EvidenceRef, MemoryBlockRecord, RecallFrame, RecordBlockMembership
-from lethyx.memory.backends.contracts import EdgeType, MemoryEdgeRecord, MemoryIndexNode
-from lethyx.memory.deep_reader import (
+from um_mem.contracts import EvidenceRef, MemoryBlockRecord, RecallFrame, RecordBlockMembership
+from um_mem.memory.backends.contracts import EdgeType, MemoryEdgeRecord, MemoryIndexNode
+from um_mem.memory.deep_reader import (
     BlockLocalEvidenceRegion,
     read_block_local_evidence_region,
 )
-from lethyx.memory.operational_slo import RecallBudget
-from lethyx.memory.recall_plan import RecallPlan
-from lethyx.memory.recall_strategy import compile_reconstructive_strategy
-from lethyx.memory.reconstruction_qualification import (
+from um_mem.memory.operational_slo import RecallBudget
+from um_mem.memory.recall_plan import RecallPlan
+from um_mem.memory.recall_strategy import compile_reconstructive_strategy
+from um_mem.memory.reconstruction_qualification import (
     ReconstructionQualificationCase,
     qualify_reconstructive_product,
 )
-from lethyx.memory.reconstructive_recall import (
+from um_mem.memory.reconstructive_recall import (
     ReconstructionObservation,
     decide_reconstruction_escalation,
     pin_recall_frame,

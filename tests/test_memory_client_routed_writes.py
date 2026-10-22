@@ -2,16 +2,16 @@ from dataclasses import asdict
 from hashlib import sha256
 from pathlib import Path
 
-from lethyx.api import MemoryClient
-from lethyx.contracts.hashing import hash_value
-from lethyx.contracts.ledger import append_verification_report_ledger_event
-from lethyx.contracts.models import MemorySemanticReview
-from lethyx.memory.backends.sqlite_index import BackendSQLiteIndex
+from um_mem.api import MemoryClient
+from um_mem.contracts.hashing import hash_value
+from um_mem.contracts.ledger import append_verification_report_ledger_event
+from um_mem.contracts.models import MemorySemanticReview
+from um_mem.memory.backends.sqlite_index import BackendSQLiteIndex
 
 
 def _client(tmp_path: Path, **kwargs: object) -> tuple[MemoryClient, BackendSQLiteIndex]:
     backend = BackendSQLiteIndex(
-        tmp_path / ".Lethyx" / "memory.sqlite", backend_id="routed", workspace_id="alpha"
+        tmp_path / ".UM-MEM" / "memory.sqlite", backend_id="routed", workspace_id="alpha"
     )
     return (
         MemoryClient(

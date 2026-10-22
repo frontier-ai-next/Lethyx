@@ -12,13 +12,13 @@ from pathlib import Path
 
 import pytest
 
-from lethyx import MemoryClient
-from lethyx.contracts import MemoryEvent
-from lethyx.memory import local_service, mcp_call, mcp_server
-from lethyx.memory.blocks.registry import load_memory_blocks, load_workspace_topology
-from lethyx.memory.backends.sqlite_index import BackendSQLiteIndex
-from lethyx.memory.kernel.telemetry import read_memory_events
-from lethyx.memory.local_service import (
+from um_mem import MemoryClient
+from um_mem.contracts import MemoryEvent
+from um_mem.memory import local_service, mcp_call, mcp_server
+from um_mem.memory.backends.sqlite_index import BackendSQLiteIndex
+from um_mem.memory.blocks.registry import load_memory_blocks, load_workspace_topology
+from um_mem.memory.kernel.telemetry import read_memory_events
+from um_mem.memory.local_service import (
     LOCAL_SERVICE_API_VERSION,
     LOCAL_SERVICE_LISTENER_HOST,
     LOCAL_SERVICE_MAX_REQUEST_BYTES,
@@ -31,7 +31,7 @@ from lethyx.memory.local_service import (
     local_service_role_allows,
     shutdown_local_service_listener,
 )
-from lethyx.memory.service_receipts import (
+from um_mem.memory.service_receipts import (
     claim_remember_receipt,
     complete_remember_receipt,
 )
@@ -270,7 +270,7 @@ import json
 import sys
 from pathlib import Path
 
-from lethyx.memory.local_service import LocalServiceClientPool, build_local_service_identity
+from um_mem.memory.local_service import LocalServiceClientPool, build_local_service_identity
 
 identity = build_local_service_identity(
     repo_root=Path(sys.argv[1]),
@@ -430,9 +430,9 @@ def test_mcp_server_normalizes_identity_before_listener(
     tmp_path: Path,
 ) -> None:
     identities: list[object] = []
-    monkeypatch.setenv("LETHYX_REPO_ROOT", str(tmp_path))
-    monkeypatch.setenv("LETHYX_WORKSPACE", "alpha")
-    monkeypatch.setenv("LETHYX_BACKEND", "mempalace")
+    monkeypatch.setenv("UM_MEM_REPO_ROOT", str(tmp_path))
+    monkeypatch.setenv("UM_MEM_WORKSPACE", "alpha")
+    monkeypatch.setenv("UM_MEM_BACKEND", "mempalace")
 
     def fake_call(identity: object, *_args: object, **_kwargs: object) -> dict[str, object]:
         identities.append(identity)
@@ -464,9 +464,9 @@ def test_mcp_server_rejects_foreign_client_identity_before_listener(
 ) -> None:
     calls: list[object] = []
     trusted_root = tmp_path / "trusted"
-    monkeypatch.setenv("LETHYX_REPO_ROOT", str(trusted_root))
-    monkeypatch.setenv("LETHYX_WORKSPACE", "trusted-workspace")
-    monkeypatch.setenv("LETHYX_BACKEND", "mempalace")
+    monkeypatch.setenv("UM_MEM_REPO_ROOT", str(trusted_root))
+    monkeypatch.setenv("UM_MEM_WORKSPACE", "trusted-workspace")
+    monkeypatch.setenv("UM_MEM_BACKEND", "mempalace")
 
     def fake_call(*args: object, **kwargs: object) -> dict[str, object]:
         calls.append((args, kwargs))
@@ -497,10 +497,10 @@ def test_mcp_server_rejects_foreign_export_path_before_listener(
 ) -> None:
     calls: list[object] = []
     trusted_vault = tmp_path / "trusted-vault"
-    monkeypatch.setenv("LETHYX_REPO_ROOT", str(tmp_path))
-    monkeypatch.setenv("LETHYX_WORKSPACE", "alpha")
-    monkeypatch.setenv("LETHYX_BACKEND", "mempalace")
-    monkeypatch.setenv("LETHYX_OBSIDIAN_VAULT", str(trusted_vault))
+    monkeypatch.setenv("UM_MEM_REPO_ROOT", str(tmp_path))
+    monkeypatch.setenv("UM_MEM_WORKSPACE", "alpha")
+    monkeypatch.setenv("UM_MEM_BACKEND", "mempalace")
+    monkeypatch.setenv("UM_MEM_OBSIDIAN_VAULT", str(trusted_vault))
 
     def fake_call(*args: object, **kwargs: object) -> dict[str, object]:
         calls.append((args, kwargs))
@@ -762,9 +762,9 @@ def test_mcp_health_keeps_tools_only_host_profile_separate_from_native_failure(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
 ) -> None:
-    monkeypatch.setenv("LETHYX_REPO_ROOT", str(tmp_path))
-    monkeypatch.setenv("LETHYX_WORKSPACE", "alpha")
-    monkeypatch.setenv("LETHYX_BACKEND", "mempalace")
+    monkeypatch.setenv("UM_MEM_REPO_ROOT", str(tmp_path))
+    monkeypatch.setenv("UM_MEM_WORKSPACE", "alpha")
+    monkeypatch.setenv("UM_MEM_BACKEND", "mempalace")
     service = {
         "ok": False,
         "state": "not_ready",
@@ -1349,7 +1349,7 @@ def test_listener_dispatch_projects_host_paths_from_common_dispatcher(
             "backend": "mempalace",
             "workspace_id": "alpha",
             "memory_id": "memory-1",
-            "source_path": "src/lethyx/memory/mcp_call.py",
+            "source_path": "src/um_mem/memory/mcp_call.py",
             "repo_root": rf"C:\\private\\{host_marker}",
             "vault_dir": rf"C:\\private\\{host_marker}\\vault",
             "files_written": [rf"C:\\private\\{host_marker}\\memory.md"],
@@ -1361,7 +1361,7 @@ def test_listener_dispatch_projects_host_paths_from_common_dispatcher(
 
     assert payload["ok"] is True
     assert payload["backend"] == "mempalace"
-    assert payload["source_path"] == "src/lethyx/memory/mcp_call.py"
+    assert payload["source_path"] == "src/um_mem/memory/mcp_call.py"
     assert host_marker not in json.dumps(payload)
     assert not {"repo_root", "vault_dir", "files_written"}.intersection(payload)
 
@@ -1520,7 +1520,7 @@ def test_client_pool_replays_durable_mutation_across_fresh_leases(tmp_path: Path
         "workspace_id": "alpha",
         "replayed": True,
     }
-    receipt_path = tmp_path / ".Lethyx" / "memory" / "service_receipts.sqlite"
+    receipt_path = tmp_path / ".UM-MEM" / "memory" / "service_receipts.sqlite"
     receipt_bytes = receipt_path.read_bytes()
     for value in (content, title, mutation_correlation_id):
         assert value.encode("utf-8") not in receipt_bytes
@@ -2039,9 +2039,9 @@ def test_mcp_server_uses_shared_listener_for_selected_identity(
         "workspace_id": "alpha",
         "backend": "mempalace",
     }
-    monkeypatch.setenv("LETHYX_REPO_ROOT", str(tmp_path))
-    monkeypatch.setenv("LETHYX_WORKSPACE", "alpha")
-    monkeypatch.setenv("LETHYX_BACKEND", "mempalace")
+    monkeypatch.setenv("UM_MEM_REPO_ROOT", str(tmp_path))
+    monkeypatch.setenv("UM_MEM_WORKSPACE", "alpha")
+    monkeypatch.setenv("UM_MEM_BACKEND", "mempalace")
     identity = build_local_service_identity(**arguments)
     mcp_server.close_local_service_clients()
     try:
@@ -2102,7 +2102,7 @@ def test_routed_policy_rejection_replays_through_common_dispatcher(
     replayed_route_decision = replayed.pop("route_decision")
     assert replayed_route_decision == route_decision
     assert replayed == {**expected, "replayed": True}
-    receipt_path = identity.repo_root / ".Lethyx" / "memory" / "service_receipts.sqlite"
+    receipt_path = identity.repo_root / ".UM-MEM" / "memory" / "service_receipts.sqlite"
     with sqlite3.connect(receipt_path) as connection:
         statuses = connection.execute("SELECT status FROM remember_receipts").fetchall()
     assert sorted(statuses) == [("committed",), ("committed",)]

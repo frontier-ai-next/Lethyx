@@ -5,8 +5,8 @@ from typing import Any
 
 import pytest
 
-from lethyx import MemoryClient
-from lethyx.contracts import (
+from um_mem import MemoryClient
+from um_mem.contracts import (
     EvidenceRef,
     MemoryBlockRecord,
     OriginRef,
@@ -14,28 +14,27 @@ from lethyx.contracts import (
     RecordBlockMembership,
     TurnChildClaim,
 )
-from lethyx.contracts.memory import CURRENT_SCHEMA_VERSION
-from lethyx.memory.backends.base import MemoryHit, MemoryQuery
-from lethyx.memory.backends.contracts import block_to_json
-from lethyx.memory.backends.hindsight import HindsightBackend
-from lethyx.memory.backends.mempalace import (
+from um_mem.contracts.memory import CURRENT_SCHEMA_VERSION
+from um_mem.memory.backends.base import MemoryHit, MemoryQuery
+from um_mem.memory.backends.contracts import block_to_json
+from um_mem.memory.backends.hindsight import HindsightBackend
+from um_mem.memory.backends.mempalace import (
     MemPalaceBackend,
     _record_partition_identity,
     _record_to_native_payload,
     _store_for_block,
 )
-from lethyx.memory.backends.mnemosyne import (
+from um_mem.memory.backends.mnemosyne import (
     MNEMOSYNE_PARTITION_PROJECTION_MARKER,
     MnemosyneBackend,
 )
-from lethyx.memory.backends.sqlite_index import BackendSQLiteIndex
-from lethyx.memory.blocks.catalog import compile_semantic_catalog
-from lethyx.memory.blocks.registry import load_memory_blocks
-from lethyx.memory.hindsight.config import HindsightConfig
-from lethyx.memory.kernel.models import block_record_to_event
-from lethyx.memory.kernel.writer import _write_memory_event
-from lethyx.memory.mutation import plan_memory_mutation
-
+from um_mem.memory.backends.sqlite_index import BackendSQLiteIndex
+from um_mem.memory.blocks.catalog import compile_semantic_catalog
+from um_mem.memory.blocks.registry import load_memory_blocks
+from um_mem.memory.hindsight.config import HindsightConfig
+from um_mem.memory.kernel.models import block_record_to_event
+from um_mem.memory.kernel.writer import _write_memory_event
+from um_mem.memory.mutation import plan_memory_mutation
 
 _CATALOG_REVISION = "test-catalog-revision"
 
@@ -234,7 +233,7 @@ class _FakeMnemosyneMemory:
                     ),
                     "source": str(
                         value.get("source")
-                        or f"lethyx:block:{metadata.get('logical_block_id') or 'project_ideas'}"
+                        or f"um_mem:block:{metadata.get('logical_block_id') or 'project_ideas'}"
                     ),
                     "score": value.get("score", 1.0),
                     "metadata": metadata,
@@ -315,7 +314,7 @@ def _native_metadata(block_id: str, **overrides: Any) -> dict[str, Any]:
     }
     metadata.update(overrides)
     metadata["primary_block_id"] = metadata["logical_block_id"]
-    metadata["source_identity"] = f"lethyx:{metadata['workspace_id']}:{block_id}"
+    metadata["source_identity"] = f"um-mem:{metadata['workspace_id']}:{block_id}"
     record = _block(
         block_id,
         status=str(metadata["status"]),
@@ -435,7 +434,7 @@ def _hindsight_backend(tmp_path: Path, rows: list[tuple[str, dict[str, Any]]]) -
             "text": f"{block_id} native memory",
             "score": 1.0,
             "tags": [
-                f"lethyx:block:{metadata.get('logical_block_id') or 'project_ideas'}",
+                f"um_mem:block:{metadata.get('logical_block_id') or 'project_ideas'}",
                 *list(metadata.get("tags") or []),
             ],
             "metadata": metadata,
@@ -457,7 +456,7 @@ def test_hindsight_recall_ignores_derived_fact_and_restores_source_document(
 ) -> None:
     metadata = _native_metadata("allowed")
     partition_id = str(metadata["native_partition_id"])
-    protected_tag = "lethyx:block:project_ideas"
+    protected_tag = "um_mem:block:project_ideas"
     backend = HindsightBackend(
         repo_root=tmp_path,
         workspace_id="ws",
@@ -473,7 +472,7 @@ def test_hindsight_recall_ignores_derived_fact_and_restores_source_document(
                 },
                 {
                     "id": "derived-experience",
-                    "document_id": "Lethyx:block:allowed",
+                    "document_id": "UM-MEM:block:allowed",
                     "bank_id": partition_id,
                     "text": "Hindsight may reformulate the retained document as an experience.",
                     "tags": [protected_tag, "wanted"],
@@ -500,7 +499,7 @@ def test_hindsight_recall_ignores_derived_fact_and_restores_source_document(
         backend.close()
 
     assert len(hits) == 1
-    assert hits[0].source == "Lethyx:block:allowed"
+    assert hits[0].source == "UM-MEM:block:allowed"
     assert restored.block_id == "allowed"
     assert restored.content == "allowed native memory"
 
@@ -747,7 +746,7 @@ def test_hindsight_native_metadata_roundtrip_preserves_timestamp_and_metadata(
         text=record.content,
         source=record.block_id,
         score=1.0,
-        tags=[f"lethyx:block:{record.block_membership.primary_block_id}", *record.tags],
+        tags=[f"um_mem:block:{record.block_membership.primary_block_id}", *record.tags],
         metadata=native_metadata,
     )
     try:
@@ -1027,7 +1026,7 @@ def test_hindsight_native_child_claim_transport_round_trip_and_fails_closed_when
         text=record.content,
         source=record.block_id,
         score=1.0,
-        tags=[f"lethyx:block:{record.block_membership.primary_block_id}", *record.tags],
+        tags=[f"um_mem:block:{record.block_membership.primary_block_id}", *record.tags],
         metadata=native_metadata,
     )
     serialized = json.loads(native_metadata["canonical_record_json"])
@@ -1052,7 +1051,7 @@ def test_hindsight_native_child_claim_transport_round_trip_and_fails_closed_when
                     source=record.block_id,
                     score=1.0,
                     tags=[
-                        f"lethyx:block:{record.block_membership.primary_block_id}",
+                        f"um_mem:block:{record.block_membership.primary_block_id}",
                         *record.tags,
                     ],
                     metadata=invalid_metadata,

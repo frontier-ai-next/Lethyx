@@ -6,15 +6,15 @@ from time import monotonic
 import pytest
 from filelock import FileLock
 
-from lethyx import MemoryBusyError
-from lethyx.memory.backends.mempalace import MemPalaceBackend
+from um_mem import MemoryBusyError
+from um_mem.memory.backends.mempalace import MemPalaceBackend
 
 
 @pytest.mark.parametrize("gate", ["thread", "file"])
 def test_busy_memory_returns_within_wait_budget_and_remains_usable(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, gate: str
 ) -> None:
-    monkeypatch.setenv("LETHYX_MEMPALACE_LOCK_TIMEOUT_SECONDS", "0.05")
+    monkeypatch.setenv("UM_MEM_MEMPALACE_LOCK_TIMEOUT_SECONDS", "0.05")
     backend = MemPalaceBackend(tmp_path, workspace_id="contention")
     entered = Event()
     release = Event()
@@ -51,7 +51,7 @@ def test_busy_memory_returns_within_wait_budget_and_remains_usable(
 def test_memory_wait_budget_rejects_unbounded_or_invalid_configuration(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, value: str
 ) -> None:
-    monkeypatch.setenv("LETHYX_MEMPALACE_LOCK_TIMEOUT_SECONDS", value)
-    with pytest.raises(ValueError, match="LETHYX_MEMPALACE_LOCK_TIMEOUT_SECONDS"):
+    monkeypatch.setenv("UM_MEM_MEMPALACE_LOCK_TIMEOUT_SECONDS", value)
+    with pytest.raises(ValueError, match="UM_MEM_MEMPALACE_LOCK_TIMEOUT_SECONDS"):
         MemPalaceBackend(tmp_path, workspace_id="invalid-budget")
     assert not list(tmp_path.iterdir())

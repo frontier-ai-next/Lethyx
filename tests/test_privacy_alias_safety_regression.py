@@ -3,12 +3,11 @@ from pathlib import Path
 
 import pytest
 
-from lethyx.api import MemoryClient
-from lethyx.contracts import MemoryBlockRecord, RecordBlockMembership
-from lethyx.memory.kernel.telemetry import read_memory_events
-from lethyx.memory.backends.sqlite_index import BackendSQLiteIndex
-from lethyx.memory.obsidian_export import export_records_to_obsidian
-
+from um_mem.api import MemoryClient
+from um_mem.contracts import MemoryBlockRecord, RecordBlockMembership
+from um_mem.memory.backends.sqlite_index import BackendSQLiteIndex
+from um_mem.memory.kernel.telemetry import read_memory_events
+from um_mem.memory.obsidian_export import export_records_to_obsidian
 
 _PROTECTED_CASES = (
     ("confidential", "full", "low"),

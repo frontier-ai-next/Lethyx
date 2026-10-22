@@ -2,14 +2,14 @@ from dataclasses import replace
 
 import pytest
 
-from lethyx import MemoryClient
-from lethyx.contracts import (
+from um_mem import MemoryClient
+from um_mem.contracts import (
     EvidenceRef,
     MemoryDecisionEvent,
     MemoryUsageEvent,
     OutcomeCreditEvent,
 )
-from lethyx.memory.backends.contracts import CanonicalHeadConflict, MemoryUsageRecord
+from um_mem.memory.backends.contracts import CanonicalHeadConflict, MemoryUsageRecord
 
 
 def _evidence(
@@ -89,7 +89,7 @@ def _credit(
         approval_principal_id=approval_principal_id,
         task_family="repair",
         stage="verification",
-        project_id="lethyx",
+        project_id="um-mem",
         host_id="codex",
         profile_id="deep-harness",
         independence_domain=f"independent-run-{index}",
@@ -201,7 +201,7 @@ def test_verified_credit_builds_contextual_shadow_summary_after_restart(
             memory_id="memory-1",
             task_family="repair",
             stage="verification",
-            project_id="lethyx",
+            project_id="um-mem",
             host_id="codex",
             profile_id="deep-harness",
             minimum_support=2,
@@ -221,7 +221,7 @@ def test_verified_credit_builds_contextual_shadow_summary_after_restart(
             memory_id="memory-1",
             task_family="unrelated",
             stage="verification",
-            project_id="lethyx",
+            project_id="um-mem",
             host_id="codex",
             profile_id="deep-harness",
             minimum_support=1,
@@ -238,7 +238,7 @@ def test_verified_credit_builds_contextual_shadow_summary_after_restart(
             memory_id="memory-1",
             task_family="repair",
             stage="verification",
-            project_id="lethyx",
+            project_id="um-mem",
             host_id="codex",
             profile_id="deep-harness",
             minimum_support=2,

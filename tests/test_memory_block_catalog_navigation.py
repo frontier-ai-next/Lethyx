@@ -4,17 +4,17 @@ from pathlib import Path
 
 import pytest
 
-from lethyx.api import MemoryClient
-from lethyx.contracts import MemoryBlockRecord, RecordBlockMembership
-from lethyx.memory.backends.contracts import MemoryIndexNode
-from lethyx.memory.backends.sqlite_index import BackendSQLiteIndex
-from lethyx.memory.blocks.catalog import (
+from um_mem.api import MemoryClient
+from um_mem.contracts import MemoryBlockRecord, RecordBlockMembership
+from um_mem.memory.backends.contracts import MemoryIndexNode
+from um_mem.memory.backends.sqlite_index import BackendSQLiteIndex
+from um_mem.memory.blocks.catalog import (
     block_descriptor_node_id,
     compile_semantic_catalog,
     sync_block_descriptor_index,
 )
-from lethyx.memory.blocks.models import MemoryBlock
-from lethyx.memory.blocks.registry import load_workspace_topology, validate_memory_block_tree
+from um_mem.memory.blocks.models import MemoryBlock
+from um_mem.memory.blocks.registry import load_workspace_topology, validate_memory_block_tree
 
 
 def _block(
@@ -291,7 +291,6 @@ def test_expand_block_falls_back_to_canonical_records_when_descriptor_is_missing
     class Backend:
         def get_index_node(self, _node_id: str, *, workspace_id: str):
             assert workspace_id == "alpha"
-            return None
 
         def record_ids_for_logical_blocks(
             self,

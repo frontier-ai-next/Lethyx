@@ -1,9 +1,9 @@
 from pathlib import Path
 
-from lethyx.contracts import EvidenceRef, MemoryBlockRecord, RecordBlockMembership
-from lethyx.memory.backends.contracts import NativePartitionMetrics
-from lethyx.memory.backends.mempalace import MemPalaceBackend
-from lethyx.memory.backends.sqlite_index import BackendSQLiteIndex
+from um_mem.contracts import EvidenceRef, MemoryBlockRecord, RecordBlockMembership
+from um_mem.memory.backends.contracts import NativePartitionMetrics
+from um_mem.memory.backends.mempalace import MemPalaceBackend
+from um_mem.memory.backends.sqlite_index import BackendSQLiteIndex
 
 
 def _record(record_id: str) -> MemoryBlockRecord:

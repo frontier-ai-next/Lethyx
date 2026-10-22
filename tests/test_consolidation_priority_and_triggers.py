@@ -2,8 +2,8 @@ from itertools import permutations
 
 import pytest
 
-from lethyx.contracts import EvidenceRef, MemoryBlockRecord
-from lethyx.memory.consolidation import (
+from um_mem.contracts import EvidenceRef, MemoryBlockRecord
+from um_mem.memory.consolidation import (
     CONSOLIDATION_TRIGGERS,
     AtomicMemoryClaim,
     CanonicalConsolidationPipeline,

@@ -1,10 +1,10 @@
-from lethyx.memory.backends.base import MemoryHit
-from lethyx.memory.backends.hindsight import HindsightBackend
-from lethyx.memory.backends.mempalace import MemPalaceBackend
-from lethyx.memory.backends.mnemosyne import MnemosyneBackend
-from lethyx.memory.mcp_facade import _plan_diagnostics
-from lethyx.memory.recall_plan import RecallPlan
-from lethyx.memory.recall_strategy import (
+from um_mem.memory.backends.base import MemoryHit
+from um_mem.memory.backends.hindsight import HindsightBackend
+from um_mem.memory.backends.mempalace import MemPalaceBackend
+from um_mem.memory.backends.mnemosyne import MnemosyneBackend
+from um_mem.memory.mcp_facade import _plan_diagnostics
+from um_mem.memory.recall_plan import RecallPlan
+from um_mem.memory.recall_strategy import (
     allocate_recall_budget,
     provenance_reference_record,
 )

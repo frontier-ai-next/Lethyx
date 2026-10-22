@@ -3,11 +3,11 @@ from typing import Any
 
 import pytest
 
-from lethyx.api import MemoryClient
-from lethyx.contracts import EvidenceRef, MemoryBlockRecord, RecordBlockMembership
-from lethyx.memory import mcp_facade
-from lethyx.memory.backends.query_policy import filter_records
-from lethyx.memory.recall_plan import RecallPlan
+from um_mem.api import MemoryClient
+from um_mem.contracts import EvidenceRef, MemoryBlockRecord, RecordBlockMembership
+from um_mem.memory import mcp_facade
+from um_mem.memory.backends.query_policy import filter_records
+from um_mem.memory.recall_plan import RecallPlan
 
 
 class _CapturingBackend:
@@ -126,7 +126,7 @@ def test_memoryclient_and_mcp_forward_the_same_agent_selected_blocks(
 
     monkeypatch.setattr(mcp_facade, "_client", lambda **_kwargs: client)
     monkeypatch.setattr(mcp_facade, "_close_client", lambda _client: None)
-    payload = mcp_facade.lethyx_build_context(
+    payload = mcp_facade.um_mem_build_context(
         query=query,
         workspace_id="alpha",
         repo_root=str(tmp_path),
@@ -140,7 +140,7 @@ def test_memoryclient_and_mcp_forward_the_same_agent_selected_blocks(
 
 
 def test_product_surfaces_do_not_construct_a_parallel_semantic_router() -> None:
-    root = Path(__file__).parents[1] / "src" / "lethyx"
+    root = Path(__file__).parents[1] / "src" / "um_mem"
 
     assert not (root / "memory" / "blocks" / "selection.py").exists()
     assert not (root / "memory" / "coverage_selection.py").exists()

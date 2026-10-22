@@ -1,13 +1,13 @@
 from dataclasses import replace
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 
 import pytest
 
-from lethyx import MemoryClient
-from lethyx.memory.active_mask import ActiveMemorySelector
-from lethyx.memory.backends.sqlite_index import BackendSQLiteIndex
-from lethyx.memory.catalog_store import WorkspaceCatalogStore
+from um_mem import MemoryClient
+from um_mem.memory.active_mask import ActiveMemorySelector
+from um_mem.memory.backends.sqlite_index import BackendSQLiteIndex
+from um_mem.memory.catalog_store import WorkspaceCatalogStore
 
 
 def _client(tmp_path: Path, index: BackendSQLiteIndex, *, task_id: str = "task-a") -> MemoryClient:
@@ -302,7 +302,7 @@ def test_suspended_mask_cannot_resume_over_another_mask_in_exact_scope(
             reason="pause",
         )
 
-        now = datetime.now(timezone.utc).isoformat()
+        now = datetime.now(UTC).isoformat()
         store = WorkspaceCatalogStore(tmp_path, "alpha", "default")
         try:
             replacement = replace(

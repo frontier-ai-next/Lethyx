@@ -1,15 +1,15 @@
 import json
 from pathlib import Path
 
-from lethyx.integrations.codex_hooks import (
-    codex_host_capability_manifest,
+from um_mem.integrations.codex_hooks import (
     codex_hooks_status,
+    codex_host_capability_manifest,
     dispatch_codex_hook,
     hook_control_response,
     install_codex_hooks,
     parse_hook_input,
 )
-from lethyx.memory.local_service import (
+from um_mem.memory.local_service import (
     build_local_service_identity,
     shutdown_local_service_listener,
 )
@@ -339,20 +339,20 @@ def test_installer_merges_all_supported_events_without_overwriting_user_hooks(
     }
     stop_handlers = [handler for group in payload["hooks"]["Stop"] for handler in group["hooks"]]
     assert any(handler.get("command") == "user-stop-hook" for handler in stop_handlers)
-    lethyx_handlers = [
+    um_mem_handlers = [
         handler
         for groups in payload["hooks"].values()
         for group in groups
         for handler in group["hooks"]
-        if "lethyx.integrations.codex_hooks" in handler.get("command", "")
+        if "um_mem.integrations.codex_hooks" in handler.get("command", "")
     ]
-    assert len(lethyx_handlers) == 11
+    assert len(um_mem_handlers) == 11
     assert all(
         handler["timeout"] == (3 if event_name == "SessionEnd" else 20)
         for event_name, groups in payload["hooks"].items()
         for group in groups
         for handler in group["hooks"]
-        if "lethyx.integrations.codex_hooks" in handler.get("command", "")
+        if "um_mem.integrations.codex_hooks" in handler.get("command", "")
     )
 
     status = codex_hooks_status(tmp_path)
@@ -375,7 +375,7 @@ def test_installer_replaces_only_its_own_stale_command_and_is_idempotent(
         for groups in payload["hooks"].values()
         for group in groups
         for handler in group["hooks"]
-        if "lethyx.integrations.codex_hooks" in handler.get("command", "")
+        if "um_mem.integrations.codex_hooks" in handler.get("command", "")
     ]
     assert len(commands) == 11
     assert all("C:/new/python.exe" in command for command in commands)

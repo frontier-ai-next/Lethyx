@@ -8,20 +8,20 @@ from concurrent.futures import Future
 
 import pytest
 
-from lethyx.api import MemoryClient
-from lethyx.memory import mcp_call
-from lethyx.memory.backends.mempalace import MemPalaceBackend
-from lethyx.memory.erase_journal import open_erase_request, record_erase_request_outcome
-from lethyx.memory.local_service import build_local_service_identity
-from lethyx.memory.operational_slo import (
+from um_mem.api import MemoryClient
+from um_mem.memory import mcp_call
+from um_mem.memory.backends.mempalace import MemPalaceBackend
+from um_mem.memory.erase_journal import open_erase_request, record_erase_request_outcome
+from um_mem.memory.local_service import build_local_service_identity
+from um_mem.memory.operational_slo import (
     CostSample,
-    OperationSample,
     OperationalSloLedger,
+    OperationSample,
     service_slo_contract_revision,
 )
-from lethyx.memory.service_receipts import claim_remember_receipt, complete_remember_receipt
-from lethyx.memory.service_scheduler import ServiceScheduler
-from lethyx.memory.service_work_queue import DurableServiceWorkQueue
+from um_mem.memory.service_receipts import claim_remember_receipt, complete_remember_receipt
+from um_mem.memory.service_scheduler import ServiceScheduler
+from um_mem.memory.service_work_queue import DurableServiceWorkQueue
 
 
 def _identity(tmp_path, *, backend: str = "mempalace"):
@@ -85,14 +85,14 @@ def test_service_database_operations_release_connections_without_garbage_collect
             ledger.headline_cost_report()
         with pytest.raises(KeyError):
             queue.item("missing-work")
-        receipt = dict(
-            workspace_id="release",
-            backend="mempalace",
-            caller_role="operator",
-            protocol_version=1,
-            mutation_correlation_id="write-1",
-            arguments={"content": "fact"},
-        )
+        receipt = {
+            "workspace_id": "release",
+            "backend": "mempalace",
+            "caller_role": "operator",
+            "protocol_version": 1,
+            "mutation_correlation_id": "write-1",
+            "arguments": {"content": "fact"},
+        }
         assert claim_remember_receipt(tmp_path, **receipt)[0] == "new"
         complete_remember_receipt(
             tmp_path,
@@ -183,7 +183,6 @@ def test_dispatch_worker_failure_completes_and_releases_slot(
             raise mcp_call.CanonicalHeadConflict("simulated stale revision")
         if failure == "timeout":
             raise TimeoutError("simulated transport timeout")
-        return None
 
     monkeypatch.setattr(mcp_call, "_dispatch_local_service_request", fail_dispatch)
     request = {"request_id": "broken-1", "tool": "block_map"}
@@ -268,7 +267,7 @@ def test_dispatch_failure_is_observed_and_next_request_runs(
     original_start = threading.Thread.start
 
     def fail_start(worker: threading.Thread) -> None:
-        if worker.name == "lethyx-dispatch-worker":
+        if worker.name == "um-mem-dispatch-worker":
             raise sqlite3.OperationalError("simulated submission failure")
         original_start(worker)
 
@@ -588,8 +587,8 @@ def test_listener_process_exits_after_close_with_stalled_worker(tmp_path) -> Non
 import sys
 import threading
 import time
-from lethyx.memory import mcp_call
-from lethyx.memory.local_service import build_local_service_identity
+from um_mem.memory import mcp_call
+from um_mem.memory.local_service import build_local_service_identity
 
 class Backend:
     def health(self):
@@ -648,9 +647,9 @@ import json
 import sys
 import threading
 import time
-from lethyx.api import MemoryClient
-from lethyx.memory import mcp_call
-from lethyx.memory.local_service import build_local_service_identity
+from um_mem.api import MemoryClient
+from um_mem.memory import mcp_call
+from um_mem.memory.local_service import build_local_service_identity
 
 identity = build_local_service_identity(
     repo_root=sys.argv[1], workspace_id="release", backend="mempalace", caller_role="operator"

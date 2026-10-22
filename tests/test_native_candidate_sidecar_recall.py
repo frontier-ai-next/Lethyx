@@ -1,34 +1,35 @@
 import json
 import threading
+from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor
+from dataclasses import replace
 from datetime import UTC, datetime
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
-from dataclasses import replace
 from pathlib import Path
 from types import SimpleNamespace
-from typing import Any, Callable
+from typing import Any
 
 import pytest
 
-from lethyx import MemoryClient
-from lethyx.contracts import EvidenceRef, MemoryBlockRecord, RecordBlockMembership
-from lethyx.memory.backends.contracts import block_to_json
-from lethyx.memory.backends.hindsight import HindsightBackend
-from lethyx.memory.backends.mempalace import (
+from um_mem import MemoryClient
+from um_mem.contracts import EvidenceRef, MemoryBlockRecord, RecordBlockMembership
+from um_mem.memory.backends.base import MemoryQuery
+from um_mem.memory.backends.contracts import block_to_json
+from um_mem.memory.backends.hindsight import HindsightBackend
+from um_mem.memory.backends.mempalace import (
     _MEMPALACE_PARTITION_PROJECTION_MARKER,
     MemPalaceBackend,
+    _native_gate_for,
     _NativeMemPalace,
     _record_partition_identity,
-    _native_gate_for,
 )
-from lethyx.memory.backends.mnemosyne import (
+from um_mem.memory.backends.mnemosyne import (
     MNEMOSYNE_PARTITION_PROJECTION_MARKER,
     MnemosyneBackend,
 )
-from lethyx.memory.backends.query_policy import merge_native_block_results
-from lethyx.memory.backends.sqlite_index import BackendSQLiteIndex
-from lethyx.memory.hindsight.config import HindsightConfig
-from lethyx.memory.backends.base import MemoryQuery
+from um_mem.memory.backends.query_policy import merge_native_block_results
+from um_mem.memory.backends.sqlite_index import BackendSQLiteIndex
+from um_mem.memory.hindsight.config import HindsightConfig
 
 
 def test_external_hindsight_transport_survives_projection_thread_changes(tmp_path, monkeypatch):
@@ -149,7 +150,7 @@ def _native_metadata(
 ) -> dict[str, Any]:
     metadata = {
         "block_id": record.block_id,
-        "source_identity": f"lethyx:{record.workspace_id}:{record.block_id}",
+        "source_identity": f"um-mem:{record.workspace_id}:{record.block_id}",
         "primary_block_id": record.block_membership.primary_block_id,
         "projection_marker": projection_marker,
         "native_partition_id": HindsightBackend._record_partition_identity(record).partition_id,
@@ -183,7 +184,7 @@ class _FakeHindsightClient:
                 "score": 1.0 - index / 10,
                 "bank_id": HindsightBackend._record_partition_identity(record).partition_id,
                 "tags": [
-                    f"lethyx:block:{record.block_membership.primary_block_id}",
+                    f"um_mem:block:{record.block_membership.primary_block_id}",
                     *record.tags,
                 ],
                 "metadata": _native_metadata(record, commit_revision=index + 1),
@@ -208,7 +209,7 @@ class _FakeHindsightClient:
         return rows[: int(kwargs.get("max_tokens") or len(rows))]
 
     def get_document(self, *, bank_id: str, document_id: str) -> dict[str, Any]:
-        block_id = document_id.removeprefix("Lethyx:block:")
+        block_id = document_id.removeprefix("UM-MEM:block:")
         row = next(row for row in self.rows if row["id"] == block_id and row["bank_id"] == bank_id)
         return {
             "id": document_id,
@@ -234,7 +235,7 @@ class _FakeMnemosyneMemory:
             record.block_id: {
                 "id": record.block_id,
                 "content": MnemosyneBackend._native_expected_content(record, index + 1),
-                "source": f"lethyx:block:{record.block_membership.primary_block_id}",
+                "source": f"um_mem:block:{record.block_membership.primary_block_id}",
                 "session_id": (
                     session_id
                     or MnemosyneBackend._native_session_partition_id(
@@ -393,7 +394,7 @@ class _FakeMemPalaceNative:
         rebuild_records: tuple[tuple[MemoryBlockRecord, int], ...] = (),
     ) -> list[dict[str, Any]]:
         del rebuild_records
-        partition_id = str(getattr(partition, "partition_id"))
+        partition_id = str(partition.partition_id)
         self.release_counts_at_rows.append(self.release_count)
         self.calls.append({"query": query, "limit": limit, "partition_id": partition_id})
         if query == "no semantic match":
@@ -403,7 +404,7 @@ class _FakeMemPalaceNative:
         ]
 
     def collection(self, _store: str, *, partition: object) -> "_FakeMemPalaceNative":
-        self._active_partition_id = str(getattr(partition, "partition_id"))
+        self._active_partition_id = str(partition.partition_id)
         return self
 
     def get(self, *, ids: list[str]) -> SimpleNamespace:
@@ -425,9 +426,7 @@ class _FakeMemPalaceNative:
         return {
             "ok": True,
             "detail": "ready",
-            "stores_ok": [
-                f"{getattr(partition, 'partition_id')}:palace.idea" for partition in partitions
-            ],
+            "stores_ok": [f"{partition.partition_id}:palace.idea" for partition in partitions],
             "stores_fail": [],
         }
 
@@ -509,9 +508,8 @@ def test_mempalace_operation_gate_releases_native_owner_after_outermost_operatio
 ) -> None:
     backend = _mempalace_backend(tmp_path, [])
     try:
-        with backend.operation_gate():
-            with backend.operation_gate():
-                assert backend._native.release_count == 0
+        with backend.operation_gate(), backend.operation_gate():
+            assert backend._native.release_count == 0
         assert backend._native.release_count == 1
     finally:
         backend.close()
@@ -625,7 +623,7 @@ def _retain_projected_sidecar(
         native_id = (
             record.block_id
             if isinstance(backend, MemPalaceBackend)
-            else f"Lethyx:block:{record.block_id}"
+            else f"UM-MEM:block:{record.block_id}"
         )
         backend._index.set_write_outbox_native_ref(entry.commit_revision, native_id)
         backend._index.complete_write_outbox(entry.commit_revision)
@@ -664,10 +662,10 @@ def test_scoped_native_recall_filters_before_top_k_and_returns_lower_global_targ
     assert [record.block_id for record in recalled] == ["target"]
     assert len(calls) == 1
     if isinstance(backend, HindsightBackend):
-        assert calls[0]["tags"] == ["lethyx:block:block-a"]
+        assert calls[0]["tags"] == ["um_mem:block:block-a"]
         assert calls[0]["tags_match"] == "all_strict"
     elif isinstance(backend, MnemosyneBackend):
-        assert calls[0]["source"] == "lethyx:block:block-a"
+        assert calls[0]["source"] == "um_mem:block:block-a"
     else:
         assert calls[0]["partition_id"] == _record_partition_identity(records[1]).partition_id
     metadata = recalled[0].metadata
@@ -764,7 +762,7 @@ def test_mnemosyne_session_partition_returns_target_below_global_top_k(
         {
             "query": "lower global target",
             "top_k": 1,
-            "source": "lethyx:block:block-a",
+            "source": "um_mem:block:block-a",
         }
     ]
 
@@ -1148,7 +1146,7 @@ def test_mnemosyne_write_uses_block_partition_session_scope_and_marker(
     call = store.instances[partition_id].remember_calls[0]
     assert result["ok"] is True
     assert call["scope"] == "session"
-    assert call["source"] == "lethyx:block:block-a"
+    assert call["source"] == "um_mem:block:block-a"
     assert call["metadata"]["session_partition_id"] == partition_id
     assert call["metadata"]["projection_marker"] == MNEMOSYNE_PARTITION_PROJECTION_MARKER
 
@@ -1519,11 +1517,11 @@ def test_mnemosyne_batch_validates_every_record_before_first_mutation(tmp_path: 
 def test_hindsight_rejects_caller_owned_reserved_block_tags(tmp_path: Path) -> None:
     record = replace(
         _record("reserved-tag", "must reject reserved tag"),
-        tags=("lethyx:block:caller-owned",),
+        tags=("um_mem:block:caller-owned",),
     )
     backend = _hindsight_backend(tmp_path, [])
     try:
-        with pytest.raises(ValueError, match="reserved lethyx:block: prefix"):
+        with pytest.raises(ValueError, match="reserved um_mem:block: prefix"):
             backend.retain_block(record)
         assert backend._index.get_block(record.block_id, workspace_id="ws") is None
     finally:

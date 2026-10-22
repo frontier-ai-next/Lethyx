@@ -1,12 +1,12 @@
 from pathlib import Path
 from typing import Any
 
-from lethyx.api import MemoryClient
-from lethyx.llm_budget import estimate_tokens
-from lethyx.memory.activation_lease import ActivationLease, activation_lease_from_payload
-from lethyx.memory.backends.base import MemoryHit
-from lethyx.memory.context_payload import pack_evidence_payload
-from lethyx.memory.recall_plan import RecallPlan
+from um_mem.api import MemoryClient
+from um_mem.llm_budget import estimate_tokens
+from um_mem.memory.activation_lease import ActivationLease, activation_lease_from_payload
+from um_mem.memory.backends.base import MemoryHit
+from um_mem.memory.context_payload import pack_evidence_payload
+from um_mem.memory.recall_plan import RecallPlan
 
 
 class ActiveFrameBackend:

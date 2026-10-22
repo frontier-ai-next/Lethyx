@@ -1,6 +1,6 @@
 import json
 
-from lethyx.integrations.hermes_provider import UmMemMemoryProvider
+from um_mem.integrations.hermes_provider import UmMemMemoryProvider
 
 
 def test_hermes_exposes_free_topology_and_active_mask_contracts(monkeypatch) -> None:
@@ -56,40 +56,40 @@ def test_hermes_exposes_free_topology_and_active_mask_contracts(monkeypatch) -> 
 
     schemas = {schema["name"]: schema for schema in provider.get_tool_schemas()}
     required = {
-        "lethyx_provider_create_block",
-        "lethyx_provider_amend_block",
-        "lethyx_provider_move_block",
-        "lethyx_provider_archive_block",
-        "lethyx_provider_revive_block",
-        "lethyx_provider_delete_block",
-        "lethyx_provider_split_block",
-        "lethyx_provider_merge_blocks",
-        "lethyx_provider_add_block_edge",
-        "lethyx_provider_remove_block_edge",
-        "lethyx_provider_get_active_mask",
-        "lethyx_provider_set_active_mask",
-        "lethyx_provider_amend_active_mask",
-        "lethyx_provider_transition_active_mask",
-        "lethyx_provider_resolve_active_mask",
-        "lethyx_provider_navigation_envelope",
-        "lethyx_provider_observe_maintenance",
-        "lethyx_provider_consolidate_observations",
+        "um_mem_provider_create_block",
+        "um_mem_provider_amend_block",
+        "um_mem_provider_move_block",
+        "um_mem_provider_archive_block",
+        "um_mem_provider_revive_block",
+        "um_mem_provider_delete_block",
+        "um_mem_provider_split_block",
+        "um_mem_provider_merge_blocks",
+        "um_mem_provider_add_block_edge",
+        "um_mem_provider_remove_block_edge",
+        "um_mem_provider_get_active_mask",
+        "um_mem_provider_set_active_mask",
+        "um_mem_provider_amend_active_mask",
+        "um_mem_provider_transition_active_mask",
+        "um_mem_provider_resolve_active_mask",
+        "um_mem_provider_navigation_envelope",
+        "um_mem_provider_observe_maintenance",
+        "um_mem_provider_consolidate_observations",
     }
     assert required <= schemas.keys()
-    create = schemas["lethyx_provider_create_block"]["parameters"]
+    create = schemas["um_mem_provider_create_block"]["parameters"]
     assert "block_id" not in create["properties"]
     assert set(create["required"]) == {"name", "synopsis", "parent_id", "reason"}
-    amend = schemas["lethyx_provider_amend_block"]["parameters"]
+    amend = schemas["um_mem_provider_amend_block"]["parameters"]
     assert amend["properties"]["expected_revision"]["type"] == "integer"
     assert "parent_id" not in amend["properties"]
     assert "archived" not in amend["properties"]
-    set_mask = schemas["lethyx_provider_set_active_mask"]["parameters"]
+    set_mask = schemas["um_mem_provider_set_active_mask"]["parameters"]
     assert set(set_mask["required"]) == {"selected_block_ids", "activation_reason"}
     assert set_mask["properties"]["token_budget"]["default"] == 2048
 
     created = json.loads(
         provider.handle_tool_call(
-            "lethyx_provider_create_block",
+            "um_mem_provider_create_block",
             {
                 "name": "Research findings",
                 "synopsis": "Verified research evidence.",
@@ -111,7 +111,7 @@ def test_hermes_exposes_free_topology_and_active_mask_contracts(monkeypatch) -> 
 
     navigated = json.loads(
         provider.handle_tool_call(
-            "lethyx_provider_navigation_envelope",
+            "um_mem_provider_navigation_envelope",
             {"block_id": "root-id"},
         )
     )
@@ -120,7 +120,7 @@ def test_hermes_exposes_free_topology_and_active_mask_contracts(monkeypatch) -> 
 
     consolidated = json.loads(
         provider.handle_tool_call(
-            "lethyx_provider_consolidate_observations",
+            "um_mem_provider_consolidate_observations",
             {
                 "source_ids": ["source-1"],
                 "content": "Bounded derived view.",
@@ -139,7 +139,7 @@ def test_hermes_exposes_free_topology_and_active_mask_contracts(monkeypatch) -> 
 
     selected = json.loads(
         provider.handle_tool_call(
-            "lethyx_provider_set_active_mask",
+            "um_mem_provider_set_active_mask",
             {
                 "selected_block_ids": ["root-id"],
                 "activation_reason": "keep the current research context across rounds",
@@ -158,14 +158,14 @@ def test_hermes_exposes_free_topology_and_active_mask_contracts(monkeypatch) -> 
 
     prefetched = json.loads(provider.prefetch("ignored", session_id="session-1"))
     assert [tool for tool, _args in calls[-2:]] == ["block_map", "resolve_active_mask"]
-    assert set(prefetched) == {"lethyx_navigation", "lethyx_active", "next"}
-    assert prefetched["lethyx_navigation"]["roots"][0]["block_id"] == "root-id"
-    assert prefetched["lethyx_active"]["context"] == "active context"
-    assert prefetched["lethyx_active"]["status"] == "resolved"
-    assert prefetched["lethyx_active"]["mask_id"] == "mask-1"
-    assert "trace" not in prefetched["lethyx_active"]
-    assert "injected automatically" in prefetched["lethyx_active"]["guidance"]
-    assert "amend" in prefetched["lethyx_active"]["guidance"].casefold()
+    assert set(prefetched) == {"um_mem_navigation", "um_mem_active", "next"}
+    assert prefetched["um_mem_navigation"]["roots"][0]["block_id"] == "root-id"
+    assert prefetched["um_mem_active"]["context"] == "active context"
+    assert prefetched["um_mem_active"]["status"] == "resolved"
+    assert prefetched["um_mem_active"]["mask_id"] == "mask-1"
+    assert "trace" not in prefetched["um_mem_active"]
+    assert "injected automatically" in prefetched["um_mem_active"]["guidance"]
+    assert "amend" in prefetched["um_mem_active"]["guidance"].casefold()
     prompt = provider.system_prompt_block()
     assert "recall is temporary" in prompt
     assert "set or amend the active mask" in prompt
@@ -187,13 +187,13 @@ def test_hermes_prefetch_exposes_active_mask_resolution_failure(monkeypatch) -> 
 
     monkeypatch.setattr(provider, "_call", call)
     monkeypatch.setattr(
-        "lethyx.integrations.hermes_provider.record_memory_event",
+        "um_mem.integrations.hermes_provider.record_memory_event",
         lambda *args, **kwargs: None,
     )
 
     prefetched = json.loads(provider.prefetch("ignored", session_id="session-1"))
 
-    assert prefetched["lethyx_active"] == {
+    assert prefetched["um_mem_active"] == {
         "status": "unavailable",
         "context": "",
         "error": "active_mask_resolution_failed",
@@ -212,12 +212,12 @@ def test_hermes_preserves_explicit_local_service_lifecycle_owner(monkeypatch) ->
         "backend": "mempalace",
         "repo_root": "unused",
     }
-    monkeypatch.setenv("LETHYX_LOCAL_SERVICE_OWNER_PID", "12345")
-    monkeypatch.setenv("LETHYX_LOCAL_SERVICE_IDLE_SECONDS", "7200")
-    monkeypatch.setenv("LETHYX_UNTRUSTED_RUNTIME_OVERRIDE", "must-not-pass")
+    monkeypatch.setenv("UM_MEM_LOCAL_SERVICE_OWNER_PID", "12345")
+    monkeypatch.setenv("UM_MEM_LOCAL_SERVICE_IDLE_SECONDS", "7200")
+    monkeypatch.setenv("UM_MEM_UNTRUSTED_RUNTIME_OVERRIDE", "must-not-pass")
 
     environment = provider._tool_env()
 
-    assert environment["LETHYX_LOCAL_SERVICE_OWNER_PID"] == "12345"
-    assert environment["LETHYX_LOCAL_SERVICE_IDLE_SECONDS"] == "7200"
-    assert "LETHYX_UNTRUSTED_RUNTIME_OVERRIDE" not in environment
+    assert environment["UM_MEM_LOCAL_SERVICE_OWNER_PID"] == "12345"
+    assert environment["UM_MEM_LOCAL_SERVICE_IDLE_SECONDS"] == "7200"
+    assert "UM_MEM_UNTRUSTED_RUNTIME_OVERRIDE" not in environment

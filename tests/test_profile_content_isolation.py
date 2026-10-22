@@ -2,8 +2,8 @@ from pathlib import Path
 
 import pytest
 
-from lethyx import MemoryClient
-from lethyx.memory.backends.sqlite_index import BackendSQLiteIndex
+from um_mem import MemoryClient
+from um_mem.memory.backends.sqlite_index import BackendSQLiteIndex
 
 
 def _shared_backend(tmp_path: Path) -> BackendSQLiteIndex:

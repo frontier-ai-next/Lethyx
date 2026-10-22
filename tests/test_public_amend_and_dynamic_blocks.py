@@ -2,10 +2,10 @@ from pathlib import Path
 
 import pytest
 
-from lethyx import MemoryClient
-from lethyx.contracts import EvidenceRef
-from lethyx.memory.backends.sqlite_index import BackendSQLiteIndex
-from lethyx.memory.blocks.registry import load_memory_blocks
+from um_mem import MemoryClient
+from um_mem.contracts import EvidenceRef
+from um_mem.memory.backends.sqlite_index import BackendSQLiteIndex
+from um_mem.memory.blocks.registry import load_memory_blocks
 
 
 def test_amend_appends_revision_and_rejects_stale_or_governance_patch(tmp_path: Path) -> None:

@@ -1,8 +1,9 @@
+import itertools
 from dataclasses import replace
 from pathlib import Path
 
-from lethyx import MemoryClient
-from lethyx.contracts import (
+from um_mem import MemoryClient
+from um_mem.contracts import (
     DerivationReceipt,
     EvidenceRef,
     MemoryBlockRecord,
@@ -12,7 +13,7 @@ from lethyx.contracts import (
     TransferEnvelope,
     TurnChildClaim,
 )
-from lethyx.memory.backends.sqlite_index import (
+from um_mem.memory.backends.sqlite_index import (
     SQLITE_INDEX_SCHEMA_VERSION,
     BackendSQLiteIndex,
 )
@@ -75,19 +76,19 @@ def _rich_record(block_id: str = "indexed-record") -> MemoryBlockRecord:
             primary_block_id="artifact_claims",
             catalog_revision_id="catalog:test",
         ),
-        repository_id="repo:lethyx",
+        repository_id="repo:um-mem",
         artifact_id="wheel",
         artifact_revision="sha256:ABCDEF1234",
         child_claims=(claim,),
         metadata={
-            "package_id": "lethyx",
+            "package_id": "um-mem",
             "component_id": "release",
             "dependencies": ["sqlite"],
             "configuration": ["release-mode"],
             "commands": ["uv run pytest"],
             "version": "2.4.0",
             "temporal_state": "current",
-            "paths": ["src/lethyx/release/controller.py"],
+            "paths": ["src/um_mem/release/controller.py"],
             "symbols": ["ReleaseController.publish"],
             "entities": ["ReleaseController"],
             "config_keys": ["release.channel"],
@@ -130,16 +131,16 @@ def test_write_builds_structure_exact_facets_and_reverse_provenance(tmp_path) ->
         envelope_id="transfer-release",
         evidence_refs=(_evidence("transfer"),),
         status="accepted",
-        source_scope="workspace:lethyx",
+        source_scope="workspace:um-mem",
         target_scope="workspace:release-fixture",
         source_task_signature="repair:python",
         target_task_signature="release:fixture",
         qualified_memory_ids=(record.block_id,),
         verified_outcome_ids=("outcome-a", "outcome-b"),
-        independence_domains=("project:lethyx", "project:release-fixture"),
+        independence_domains=("project:um-mem", "project:release-fixture"),
         source_workflow="repair-python",
         target_workflow="release-fixture",
-        source_project_id="lethyx",
+        source_project_id="um-mem",
         target_project_id="release-fixture",
         source_host="hermes",
         target_host="codex",
@@ -151,7 +152,7 @@ def test_write_builds_structure_exact_facets_and_reverse_provenance(tmp_path) ->
         contraindications=("untrusted-origin",),
         exclusions=("production-erase",),
         support_count=2,
-        source_revision_id="lethyx@abc123",
+        source_revision_id="um-mem@abc123",
         valid_from="2026-01-01T00:00:00Z",
         expires_at="2027-01-01T00:00:00Z",
         drift_fingerprint="sha256:transfer-release",
@@ -161,8 +162,8 @@ def test_write_builds_structure_exact_facets_and_reverse_provenance(tmp_path) ->
         index.refresh_memory_indexes(record.block_id, transfer_envelope=envelope)
 
         terms = index.exact_index_terms(record.block_id)
-        assert terms["path"] == ("src/lethyx/release/controller.py",)
-        assert terms["package"] == ("lethyx",)
+        assert terms["path"] == ("src/um_mem/release/controller.py",)
+        assert terms["package"] == ("um-mem",)
         assert terms["component"] == ("release",)
         assert terms["symbol"] == ("ReleaseController.publish",)
         assert terms["entity"] == ("ReleaseController",)
@@ -178,7 +179,7 @@ def test_write_builds_structure_exact_facets_and_reverse_provenance(tmp_path) ->
         assert terms["independence_domain"] == ("pytest:independent:tool",)
         assert terms["checkpoint_source_range"] == ("events:100-120",)
         assert terms["fold_source_range"] == ("events:80-99",)
-        assert terms["transfer_source_scope"] == ("workspace:lethyx",)
+        assert terms["transfer_source_scope"] == ("workspace:um-mem",)
         assert terms["transfer_target_scope"] == ("workspace:release-fixture",)
 
         nodes = index.project_structure_nodes(record.block_id)
@@ -190,14 +191,15 @@ def test_write_builds_structure_exact_facets_and_reverse_provenance(tmp_path) ->
             "symbol",
         ]
         assert [node.metadata["structure_value"] for node in nodes] == [
-            "repo:lethyx",
-            "lethyx",
+            "repo:um-mem",
+            "um-mem",
             "release",
-            "src/lethyx/release/controller.py",
+            "src/um_mem/release/controller.py",
             "ReleaseController.publish",
         ]
         assert all(
-            child.metadata["parent_id"] == parent.node_id for parent, child in zip(nodes, nodes[1:])
+            child.metadata["parent_id"] == parent.node_id
+            for parent, child in itertools.pairwise(nodes)
         )
         facet_nodes = index.select_index_nodes(
             workspace_id="ws",

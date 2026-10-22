@@ -9,27 +9,26 @@ from typing import Any
 
 import pytest
 
-from lethyx.api import MemoryClient
-from lethyx.contracts import EvidenceRef
-from lethyx.contracts.ledger import (
+from um_mem.api import MemoryClient
+from um_mem.contracts import EvidenceRef, MemoryBlockRecord, MemoryEvent, RecordBlockMembership
+from um_mem.contracts.ledger import (
     append_supervisor_ledger_event,
     append_verification_report_ledger_event,
 )
-from lethyx.contracts import MemoryBlockRecord, MemoryEvent, RecordBlockMembership
-from lethyx.memory.backends.contracts import (
+from um_mem.memory import mcp_facade
+from um_mem.memory.backends import mempalace as mempalace_backend
+from um_mem.memory.backends.contracts import (
     CanonicalHeadReservation,
     MemoryEdgeRecord,
     MemoryUsageRecord,
 )
-from lethyx.memory.backends import mempalace as mempalace_backend
-from lethyx.memory.backends.mempalace import MemPalaceBackend
-from lethyx.memory.blocks.catalog import compile_semantic_catalog
-from lethyx.memory.blocks.registry import load_memory_blocks
-from lethyx.memory.kernel.models import block_record_to_event
-from lethyx.memory.kernel.telemetry import read_memory_events
-from lethyx.memory.kernel.writer import _write_memory_event
-from lethyx.memory.mutation import plan_memory_mutation
-from lethyx.memory import mcp_facade
+from um_mem.memory.backends.mempalace import MemPalaceBackend
+from um_mem.memory.blocks.catalog import compile_semantic_catalog
+from um_mem.memory.blocks.registry import load_memory_blocks
+from um_mem.memory.kernel.models import block_record_to_event
+from um_mem.memory.kernel.telemetry import read_memory_events
+from um_mem.memory.kernel.writer import _write_memory_event
+from um_mem.memory.mutation import plan_memory_mutation
 
 
 class _MutationBackend:
@@ -329,7 +328,7 @@ def test_forget_preserves_existing_and_new_evidence(tmp_path) -> None:
     )
     requested = EvidenceRef(
         ref_type="session_event",
-        ref_id="lethyx-forget:operator",
+        ref_id="um-mem-forget:operator",
         produced_by="harness",
         producer_id="harness:forget-request",
     )
@@ -1472,7 +1471,7 @@ def test_mcp_forget_delegates_to_memory_client(monkeypatch) -> None:
     monkeypatch.setattr(mcp_facade, "_client", lambda **_kwargs: client)
     monkeypatch.setattr(mcp_facade, "_close_client", lambda _client: None)
 
-    payload = mcp_facade.lethyx_forget(
+    payload = mcp_facade.um_mem_forget(
         memory_id="memory-1",
         reason="operator retraction",
         workspace_id="alpha",
@@ -1483,7 +1482,7 @@ def test_mcp_forget_delegates_to_memory_client(monkeypatch) -> None:
     evidence = received["evidence_refs"][0]
     assert (evidence.ref_type, evidence.ref_id, evidence.produced_by, evidence.producer_id) == (
         "session_event",
-        "lethyx-forget:operator retraction",
+        "um-mem-forget:operator retraction",
         "harness",
-        "mcp:lethyx_forget",
+        "mcp:um_mem_forget",
     )

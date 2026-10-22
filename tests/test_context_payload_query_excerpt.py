@@ -1,21 +1,21 @@
 from dataclasses import asdict
 
-from lethyx.contracts import (
+from um_mem.contracts import (
     EvidenceRef,
     MemoryBlockRecord,
     OriginRef,
     OriginSegment,
     TurnChildClaim,
 )
-from lethyx.memory.backends.contracts import block_record_to_memory_hit
-from lethyx.memory.context_payload import (
+from um_mem.memory.backends.contracts import block_record_to_memory_hit
+from um_mem.memory.context_payload import (
     compact_context_item,
     compact_context_metadata,
     excerpt_to_tokens,
     pack_evidence_payload,
     truncate_to_tokens,
 )
-from lethyx.memory.query_analysis import EvidenceRequirement
+from um_mem.memory.query_analysis import EvidenceRequirement
 
 
 def _context_item(block_id: str, text: str) -> dict[str, object]:
@@ -199,7 +199,7 @@ def test_excerpt_ignores_semantic_query_words_and_returns_same_prefix() -> None:
 
 
 def test_structural_exact_path_can_use_a_bounded_capsule() -> None:
-    exact_path = "src/lethyx/memory/context_payload.py"
+    exact_path = "src/um_mem/memory/context_payload.py"
     text = "Architecture source.\n" + ("Archived material.\n" * 180) + exact_path
 
     payload = pack_evidence_payload(

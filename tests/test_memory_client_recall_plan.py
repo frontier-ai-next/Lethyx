@@ -4,10 +4,10 @@ from typing import Any
 
 import pytest
 
-from lethyx.api import MemoryClient
-from lethyx.contracts import RecordBlockMembership
-from lethyx.memory.backends.base import MemoryHit
-from lethyx.memory.recall_plan import RecallPlan
+from um_mem.api import MemoryClient
+from um_mem.contracts import RecordBlockMembership
+from um_mem.memory.backends.base import MemoryHit
+from um_mem.memory.recall_plan import RecallPlan
 
 
 class RecordingEvidenceBackend:

@@ -1,15 +1,15 @@
-from dataclasses import replace
 import json
 import sqlite3
+from dataclasses import replace
 
 import pytest
 
-from lethyx import MemoryClient
-from lethyx.contracts import ConsolidationCommitReceipt, EvidenceRef
-from lethyx.memory.backends.contracts import CanonicalHeadConflict, EdgeType
-from lethyx.memory.backends.mempalace import MemPalaceBackend, _record_partition_identity
-from lethyx.memory.backends.sqlite_index import BackendSQLiteIndex
-from lethyx.memory.mutation import plan_memory_mutation
+from um_mem import MemoryClient
+from um_mem.contracts import ConsolidationCommitReceipt, EvidenceRef
+from um_mem.memory.backends.contracts import CanonicalHeadConflict, EdgeType
+from um_mem.memory.backends.mempalace import MemPalaceBackend, _record_partition_identity
+from um_mem.memory.backends.sqlite_index import BackendSQLiteIndex
+from um_mem.memory.mutation import plan_memory_mutation
 
 
 def test_prepare_stages_payload_without_publishing_successor(tmp_path) -> None:

@@ -1,29 +1,29 @@
-from dataclasses import replace
 import json
 import time
-from typing import Any
+from dataclasses import replace
+from typing import Any, Self
 from urllib.parse import quote
 
 import pytest
-import lethyx.memory.backends.hindsight as hindsight_module
 
-from lethyx.contracts import (
+import um_mem.memory.backends.hindsight as hindsight_module
+from um_mem import MemoryClient
+from um_mem.contracts import (
     EvidenceRef,
     MemoryBlockRecord,
     ProspectiveObligation,
     RecordBlockMembership,
 )
-from lethyx.memory.backends.contracts import BackendCapabilities, CanonicalHeadConflict
-from lethyx.memory.backends.hindsight import HindsightBackend
-from lethyx.memory.backends.query_policy import native_block_tag
-from lethyx.memory.backends.mempalace import MemPalaceBackend, _record_partition_identity
-from lethyx.memory.backends.mnemosyne import MnemosyneBackend
-from lethyx.memory.backends.sqlite_index import BackendSQLiteIndex
-from lethyx.memory.hindsight.config import HindsightConfig
-from lethyx.memory.kernel.models import block_record_to_event
-from lethyx.memory.kernel.writer import _write_memory_event
-from lethyx.memory.mutation import MutationDecision
-from lethyx import MemoryClient
+from um_mem.memory.backends.contracts import BackendCapabilities, CanonicalHeadConflict
+from um_mem.memory.backends.hindsight import HindsightBackend
+from um_mem.memory.backends.mempalace import MemPalaceBackend, _record_partition_identity
+from um_mem.memory.backends.mnemosyne import MnemosyneBackend
+from um_mem.memory.backends.query_policy import native_block_tag
+from um_mem.memory.backends.sqlite_index import BackendSQLiteIndex
+from um_mem.memory.hindsight.config import HindsightConfig
+from um_mem.memory.kernel.models import block_record_to_event
+from um_mem.memory.kernel.writer import _write_memory_event
+from um_mem.memory.mutation import MutationDecision
 
 
 def _evidence(name: str) -> EvidenceRef:
@@ -112,7 +112,7 @@ class _SyncHttpResponse:
     def __init__(self, payload: dict[str, Any]) -> None:
         self.payload = payload
 
-    def __enter__(self) -> "_SyncHttpResponse":
+    def __enter__(self) -> Self:
         return self
 
     def __exit__(self, *_args: object) -> None:
@@ -695,7 +695,7 @@ def test_hindsight_external_projection_lookup_uses_sync_http_without_async_clien
     record = _record("sync-http")
     entry = backend._index.open_write_outbox(record=record, store="hindsight")
     payload = {
-        "id": f"Lethyx:block:{record.block_id}",
+        "id": f"UM-MEM:block:{record.block_id}",
         "bank_id": backend._block_native_metadata(
             record,
             commit_revision=entry.commit_revision,

@@ -1,7 +1,7 @@
 from itertools import permutations
 
-from lethyx.contracts import EvidenceRef
-from lethyx.memory.consolidation import (
+from um_mem.contracts import EvidenceRef
+from um_mem.memory.consolidation import (
     ConsolidationExitMetrics,
     ConsolidationInputGate,
     ConsolidationScheduler,

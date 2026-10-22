@@ -2,8 +2,8 @@ import sqlite3
 
 import pytest
 
-from lethyx.memory.local_service import build_local_service_identity
-from lethyx.memory.operational_slo import (
+from um_mem.memory.local_service import build_local_service_identity
+from um_mem.memory.operational_slo import (
     BACKENDS,
     CONCURRENCY_LEVELS,
     CORPUS_TIERS,
@@ -12,8 +12,8 @@ from lethyx.memory.operational_slo import (
     DEFAULT_SERVICE_SLO_MATRIX,
     QUERY_MODES,
     CostSample,
-    OperationSample,
     OperationalSloLedger,
+    OperationSample,
     PrefixCacheSample,
     RecallBudget,
     RecallUsage,
@@ -401,7 +401,7 @@ def test_slo_additive_observations_preserve_legacy_cost_rows(tmp_path) -> None:
 
 
 def test_public_runtime_usage_is_partial_idempotent_and_scope_bound(tmp_path) -> None:
-    from lethyx import MemoryClient
+    from um_mem import MemoryClient
 
     client = MemoryClient(
         tmp_path, workspace_id="cost-test", profile_id="umbrella", backend="mempalace"

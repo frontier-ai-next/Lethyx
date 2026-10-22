@@ -3,8 +3,8 @@ from pathlib import Path
 
 import pytest
 
-from lethyx import MemoryClient, WorkingSnapshotBudgetError
-from lethyx.contracts import MemoryBlockRecord
+from um_mem import MemoryClient, WorkingSnapshotBudgetError
+from um_mem.contracts import MemoryBlockRecord
 
 
 class RecordBackend:

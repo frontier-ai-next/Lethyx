@@ -3,17 +3,16 @@ from dataclasses import replace
 from pathlib import Path
 from typing import Any
 
-from lethyx.api import MemoryClient
-from lethyx.llm_budget import estimate_tokens
-from lethyx.memory.activation_lease import ActivationLease
-from lethyx.memory.backends.base import MemoryHit
-from lethyx.memory.cli import main as memory_cli_main
-from lethyx.memory.context_payload import pack_evidence_payload
-from lethyx.memory.deep_reader import DeepReadResult
-from lethyx.memory.query_analysis import EvidenceRequirement
+from um_mem.api import MemoryClient
+from um_mem.llm_budget import estimate_tokens
+from um_mem.memory.activation_lease import ActivationLease
+from um_mem.memory.backends.base import MemoryHit
+from um_mem.memory.cli import main as memory_cli_main
+from um_mem.memory.context_payload import pack_evidence_payload
+from um_mem.memory.deep_reader import DeepReadResult
+from um_mem.memory.query_analysis import EvidenceRequirement
 
-
-EXACT_PATH = "src/lethyx/memory/context_payload.py"
+EXACT_PATH = "src/um_mem/memory/context_payload.py"
 
 
 def _hit(
@@ -229,7 +228,7 @@ def test_explain_recall_cli_emits_json_without_prompt_payload(
 ) -> None:
     backend = TraceBackend()
     monkeypatch.setattr(
-        "lethyx.memory.cli.create_durable_backend",
+        "um_mem.memory.cli.create_durable_backend",
         lambda *_args, **_kwargs: backend,
     )
 

@@ -3,7 +3,7 @@ from pathlib import Path
 
 import pytest
 
-from lethyx.integrations.claude_hooks import (
+from um_mem.integrations.claude_hooks import (
     claude_hooks_status,
     claude_host_capability_manifest,
     dispatch_claude_hook,
@@ -306,7 +306,7 @@ def test_installer_merges_safe_hooks_and_requires_explicit_file_watch_names(
         handler["command"] for group in payload["hooks"]["Stop"] for handler in group["hooks"]
     ]
     assert "user-stop-hook" in stop_commands
-    assert any("lethyx.integrations.claude_hooks" in command for command in stop_commands)
+    assert any("um_mem.integrations.claude_hooks" in command for command in stop_commands)
 
     status = claude_hooks_status(tmp_path, watch_files=(".env", ".envrc"))
     assert status["installed"] is True

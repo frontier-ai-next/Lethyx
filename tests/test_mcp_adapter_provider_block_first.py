@@ -2,18 +2,18 @@ import json
 from pathlib import Path
 from typing import Any
 
-from lethyx.api import MemoryClient
-from lethyx.integrations.hermes_provider import UmMemMemoryProvider
-from lethyx.memory import mcp_facade
-from lethyx.memory.backends.base import MemoryHit
-from lethyx.contracts import EvidenceRef, MemoryBlockRecord, RecordBlockMembership
-from lethyx.memory.backends.contracts import block_record_to_memory_hit
-from lethyx.memory.mcp_facade import (
-    lethyx_block_map,
-    lethyx_build_context,
-    lethyx_expand_block,
+from um_mem.api import MemoryClient
+from um_mem.contracts import EvidenceRef, MemoryBlockRecord, RecordBlockMembership
+from um_mem.integrations.hermes_provider import UmMemMemoryProvider
+from um_mem.memory import mcp_facade
+from um_mem.memory.backends.base import MemoryHit
+from um_mem.memory.backends.contracts import block_record_to_memory_hit
+from um_mem.memory.mcp_facade import (
+    um_mem_block_map,
+    um_mem_build_context,
+    um_mem_expand_block,
 )
-from lethyx.memory.recall_plan import RecallPlan
+from um_mem.memory.recall_plan import RecallPlan
 
 
 class FacadeBackend:
@@ -85,7 +85,7 @@ def test_mcp_facade_build_context_forwards_semantic_block_parameters(monkeypatch
     monkeypatch.setattr(mcp_facade, "_client", lambda **kwargs: client)
     monkeypatch.setattr(mcp_facade, "_close_client", lambda client: None)
 
-    payload = lethyx_build_context(
+    payload = um_mem_build_context(
         query="parser",
         workspace_id="alpha",
         repo_root="unused",
@@ -138,8 +138,8 @@ def test_mcp_and_hermes_expose_root_map_and_selected_branch_expansion(monkeypatc
     monkeypatch.setattr(mcp_facade, "_client", lambda **kwargs: client)
     monkeypatch.setattr(mcp_facade, "_close_client", lambda client: None)
 
-    root_map = lethyx_block_map(workspace_id="alpha", repo_root="unused")
-    expanded = lethyx_expand_block(
+    root_map = um_mem_block_map(workspace_id="alpha", repo_root="unused")
+    expanded = um_mem_expand_block(
         "semantic_memory_index",
         workspace_id="alpha",
         repo_root="unused",
@@ -160,13 +160,13 @@ def test_mcp_and_hermes_expose_root_map_and_selected_branch_expansion(monkeypatc
     )
     schema_names = {schema["name"] for schema in provider.get_tool_schemas()}
 
-    provider.handle_tool_call("lethyx_provider_block_map", {})
+    provider.handle_tool_call("um_mem_provider_block_map", {})
     provider.handle_tool_call(
-        "lethyx_provider_expand_block",
+        "um_mem_provider_expand_block",
         {"block_id": "semantic_memory_index"},
     )
 
-    assert {"lethyx_provider_block_map", "lethyx_provider_expand_block"} <= schema_names
+    assert {"um_mem_provider_block_map", "um_mem_provider_expand_block"} <= schema_names
     assert calls == [
         ("block_map", {}),
         ("expand_block", {"block_id": "semantic_memory_index"}),
@@ -222,7 +222,7 @@ def test_mcp_facade_build_context_keeps_explicit_block_scope(monkeypatch, tmp_pa
     monkeypatch.setattr(mcp_facade, "_client", lambda **kwargs: client)
     monkeypatch.setattr(mcp_facade, "_close_client", lambda client: None)
 
-    payload = lethyx_build_context(
+    payload = um_mem_build_context(
         query="mnemosyne episodic workspace memory",
         workspace_id="alpha",
         repo_root=str(tmp_path),
@@ -261,7 +261,7 @@ def test_hermes_provider_tool_schema_and_call_support_semantic_block_hints(monke
     schema = next(
         tool
         for tool in provider.get_tool_schemas()
-        if tool["name"] == "lethyx_provider_recall_blocks"
+        if tool["name"] == "um_mem_provider_recall_blocks"
     )
     properties = schema["parameters"]["properties"]
 
@@ -275,7 +275,7 @@ def test_hermes_provider_tool_schema_and_call_support_semantic_block_hints(monke
     assert "include_global" not in properties
 
     provider.handle_tool_call(
-        "lethyx_provider_recall_blocks",
+        "um_mem_provider_recall_blocks",
         {
             "query": "parser",
             "logical_block_ids": ["code_resources"],
@@ -311,7 +311,7 @@ def test_hermes_provider_rejects_unknown_recall_argument_before_bridge_dispatch(
 
     payload = json.loads(
         provider.handle_tool_call(
-            "lethyx_provider_recall_blocks",
+            "um_mem_provider_recall_blocks",
             {
                 "query": "parser",
                 "logical_block_ids": ["code_resources"],
@@ -334,7 +334,7 @@ def test_hermes_provider_rejects_model_claimed_scope_before_dispatch(monkeypatch
 
     payload = json.loads(
         provider.handle_tool_call(
-            "lethyx_provider_recall_blocks",
+            "um_mem_provider_recall_blocks",
             {
                 "query": "parser",
                 "logical_block_ids": ["code_resources"],
@@ -383,7 +383,7 @@ def test_hermes_write_tool_requires_selected_block_and_supports_correction_by_id
     )
 
     schema = next(
-        tool for tool in provider.get_tool_schemas() if tool["name"] == "lethyx_provider_remember"
+        tool for tool in provider.get_tool_schemas() if tool["name"] == "um_mem_provider_remember"
     )
     assert set(schema["parameters"]["required"]) == {
         "content",
@@ -391,13 +391,13 @@ def test_hermes_write_tool_requires_selected_block_and_supports_correction_by_id
         "requested_block_id",
     }
     rejected = json.loads(
-        provider.handle_tool_call("lethyx_provider_remember", {"content": "missing scope"})
+        provider.handle_tool_call("um_mem_provider_remember", {"content": "missing scope"})
     )
     assert rejected["error"] == "requested_block_id is required"
 
     accepted = json.loads(
         provider.handle_tool_call(
-            "lethyx_provider_remember",
+            "um_mem_provider_remember",
             {
                 "content": "corrected value",
                 "operation": "correct",

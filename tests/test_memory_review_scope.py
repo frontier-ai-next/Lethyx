@@ -2,9 +2,9 @@
 
 from dataclasses import asdict
 
-from lethyx.contracts import EvidenceRef, MemoryBlockRecord, MemorySemanticReview
-from lethyx.memory.context_payload import compact_context_metadata
-from lethyx.memory.mcp_facade import _packed_payload_from_records
+from um_mem.contracts import EvidenceRef, MemoryBlockRecord, MemorySemanticReview
+from um_mem.memory.context_payload import compact_context_metadata
+from um_mem.memory.mcp_facade import _packed_payload_from_records
 
 
 def test_historical_verified_label_does_not_claim_independent_review() -> None:

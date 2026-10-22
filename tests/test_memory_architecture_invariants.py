@@ -1,30 +1,29 @@
 from pathlib import Path
 from typing import Any
 
-from lethyx.contracts import EvidenceRef, MemoryBlockRecord
-from lethyx.memory.selection import MemorySelectionPolicy, SelectionContext
-
+from um_mem.contracts import EvidenceRef, MemoryBlockRecord
+from um_mem.memory.selection import MemorySelectionPolicy, SelectionContext
 
 ROOT = Path(__file__).resolve().parents[1]
 
 
 def _block(**overrides: Any) -> MemoryBlockRecord:
-    base = dict(
-        block_id="mem-1",
-        content="alpha evidence",
-        title="Alpha",
-        status="accepted",
-        retention="durable",
-        delivery_policy="on_demand",
-        temperature="warm",
-        authority="advisory",
-        trust_level="workspace_verified",
-        scope="workspace",
-        verification_status="verified",
-        verification_methods=("test_run",),
-        promotion_decision="accepted",
-        workspace_id="alpha",
-        evidence_refs=(
+    base = {
+        "block_id": "mem-1",
+        "content": "alpha evidence",
+        "title": "Alpha",
+        "status": "accepted",
+        "retention": "durable",
+        "delivery_policy": "on_demand",
+        "temperature": "warm",
+        "authority": "advisory",
+        "trust_level": "workspace_verified",
+        "scope": "workspace",
+        "verification_status": "verified",
+        "verification_methods": ("test_run",),
+        "promotion_decision": "accepted",
+        "workspace_id": "alpha",
+        "evidence_refs": (
             EvidenceRef(
                 ref_type="test_run",
                 ref_id="inv",
@@ -32,8 +31,8 @@ def _block(**overrides: Any) -> MemoryBlockRecord:
                 producer_id="verifier:invariant",
             ),
         ),
-        metadata={},
-    )
+        "metadata": {},
+    }
     base.update(overrides)
     return MemoryBlockRecord(**base)
 

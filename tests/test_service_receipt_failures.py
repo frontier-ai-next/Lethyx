@@ -5,9 +5,9 @@ from pathlib import Path
 
 import pytest
 
-from lethyx.memory import mcp_call
-from lethyx.memory.local_service import build_local_service_identity
-from lethyx.memory.service_receipts import (
+from um_mem.memory import mcp_call
+from um_mem.memory.local_service import build_local_service_identity
+from um_mem.memory.service_receipts import (
     claim_remember_receipt,
     complete_remember_receipt,
     service_receipt_path,

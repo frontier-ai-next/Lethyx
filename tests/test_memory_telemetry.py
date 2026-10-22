@@ -1,11 +1,10 @@
 import hashlib
 
-from lethyx.memory.kernel import telemetry
-
-from lethyx.memory.backends.contracts import NativePartitionIdentity
-from lethyx.memory.backends.sqlite_index import BackendSQLiteIndex
-from lethyx.memory.cli import main as memory_cli_main
-from lethyx.memory.kernel.telemetry import (
+from um_mem.memory.backends.contracts import NativePartitionIdentity
+from um_mem.memory.backends.sqlite_index import BackendSQLiteIndex
+from um_mem.memory.cli import main as memory_cli_main
+from um_mem.memory.kernel import telemetry
+from um_mem.memory.kernel.telemetry import (
     memory_event_report,
     memory_event_trace_path,
     memory_profile_report,

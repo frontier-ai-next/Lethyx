@@ -3,10 +3,10 @@ from pathlib import Path
 
 import pytest
 
-from lethyx import BackendCapabilities, MemoryClient
-from lethyx.contracts import MemoryBlockRecord, RecordBlockMembership
-from lethyx.contracts.memory import MemoryStatus
-from lethyx.contracts.models import EvidenceRef
+from um_mem import BackendCapabilities, MemoryClient
+from um_mem.contracts import MemoryBlockRecord, RecordBlockMembership
+from um_mem.contracts.memory import MemoryStatus
+from um_mem.contracts.models import EvidenceRef
 
 
 def record() -> MemoryBlockRecord:

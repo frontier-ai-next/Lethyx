@@ -2,8 +2,7 @@ import ast
 from pathlib import Path
 from typing import get_args
 
-from lethyx.contracts import BackendId
-
+from um_mem.contracts import BackendId
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 
@@ -13,7 +12,7 @@ def test_selected_backend_identity_is_the_only_runtime_backend_axis() -> None:
 
 
 def test_replaced_structured_memory_modules_are_physically_absent() -> None:
-    memory_root = REPO_ROOT / "src/lethyx/memory"
+    memory_root = REPO_ROOT / "src/um_mem/memory"
     retired_modules = (
         "store.py",
         "models.py",
@@ -29,9 +28,9 @@ def test_replaced_structured_memory_modules_are_physically_absent() -> None:
     )
     assert [name for name in retired_modules if (memory_root / name).exists()] == []
 
-    retired_imports = {f"lethyx.memory.{name.removesuffix('.py')}" for name in retired_modules}
+    retired_imports = {f"um_mem.memory.{name.removesuffix('.py')}" for name in retired_modules}
     imports: set[str] = set()
-    for path in (REPO_ROOT / "src/lethyx").rglob("*.py"):
+    for path in (REPO_ROOT / "src/um_mem").rglob("*.py"):
         for node in ast.walk(ast.parse(path.read_text(encoding="utf-8"))):
             if isinstance(node, ast.Import):
                 imports.update(alias.name for alias in node.names)

@@ -2,12 +2,12 @@ import hashlib
 
 import pytest
 
-from lethyx import MemoryClient
-from lethyx.contracts import HostObservation
-from lethyx.memory.backends.contracts import EdgeType
-from lethyx.memory.backends.sqlite_index import BackendSQLiteIndex
-from lethyx.memory import mcp_facade
-from lethyx.memory.local_service import local_service_role_allows
+from um_mem import MemoryClient
+from um_mem.contracts import HostObservation
+from um_mem.memory import mcp_facade
+from um_mem.memory.backends.contracts import EdgeType
+from um_mem.memory.backends.sqlite_index import BackendSQLiteIndex
+from um_mem.memory.local_service import local_service_role_allows
 
 
 def test_registered_source_preserves_bytes_provenance_and_event_identity(tmp_path) -> None:
@@ -97,13 +97,13 @@ def test_conversation_witness_identity_rejects_changed_bytes_after_recheck(tmp_p
     client = MemoryClient(
         tmp_path, workspace_id="ws", session_id="session-a", backend_instance=index
     )
-    base = dict(
-        event_id="turn-1",
-        event_kind="conversation_turn",
-        raw_evidence="exact",
-        observed_at="2026-10-15T10:00:00Z",
-        producer_id="trusted-host",
-    )
+    base = {
+        "event_id": "turn-1",
+        "event_kind": "conversation_turn",
+        "raw_evidence": "exact",
+        "observed_at": "2026-10-15T10:00:00Z",
+        "producer_id": "trusted-host",
+    }
     try:
         first = client.observe(HostObservation(**base))
         replay = client.observe(HostObservation(**{**base, "observed_at": "2026-10-15T11:00:00Z"}))
@@ -124,7 +124,7 @@ def test_host_observe_surface_preserves_registered_source_provenance(tmp_path, m
     assert local_service_role_allows("host_hook", "observe")
     assert not local_service_role_allows("parent", "observe")
     try:
-        result = mcp_facade.lethyx_observe(
+        result = mcp_facade.um_mem_observe(
             event_id="turn-1",
             event_kind="conversation_turn",
             raw_evidence="  Ада 🧠  ",

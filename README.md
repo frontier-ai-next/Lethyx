@@ -1,6 +1,6 @@
-# Lethyx
+# UM-MEM
 
-Lethyx is a framework-neutral local memory layer for agent systems. It can be
+UM-MEM is a framework-neutral local memory layer for agent systems. It can be
 used as an embedded Python package, connected through MCP, or installed through
 a host adapter. The host remains responsible for routing, permissions, proof
 validity, and task completion; memory supplies scoped advisory context.
@@ -14,31 +14,31 @@ identity and optional durable operation replay. Publication requires semantic
 verification bound to an exact revision, source evidence, profile and target.
 Hermes can opt into independently verified task working views at its native
 compression boundary. This mode defaults off pending paired quality, latency
-and total model-cost evaluation. See [Developer profiling](docs/lethyx/developer_profiling.md)
+and total model-cost evaluation. See [Developer profiling](docs/um-mem/developer_profiling.md)
 for diagnostics.
 
 ## Install
 
-Lethyx requires Python 3.12 or newer.
+UM-MEM requires Python 3.12 or newer.
 
 Fast path with the npm launcher (Node 18+):
 
 ```console
-npm install -g @lethyx/cli
-lethyx install
-lethyx setup
+npm install -g @um-mem/cli
+um-memory install
+um-memory setup
 ```
 
-`lethyx setup` asks for the store, backend, harness and whether to enable the
+`um-memory setup` asks for the store, backend, harness and whether to enable the
 optional embedding tier, then connects the harness for you.
 
 Or install the Python package directly:
 
 ```console
-git clone https://github.com/frontier-ai-next/Lethyx.git
-cd Lethyx
+git clone https://github.com/frontier-ai-next/UM-MEM.git
+cd UM-MEM
 python -m pip install ".[mcp]"
-lethyx setup
+um-memory setup
 ```
 
 For development from a clone:
@@ -47,7 +47,7 @@ For development from a clone:
 python -m pip install -e ".[dev,mcp]"
 ```
 
-See [Install and connect a harness](docs/lethyx/install.md) for the backend
+See [Install and connect a harness](docs/um-mem/install.md) for the backend
 matrix, harness paths, embedding trade-offs and troubleshooting.
 
 ### Optional: multilingual semantic tier
@@ -56,14 +56,31 @@ The default install stays small, runs on any machine, and never downloads a
 model. A local semantic tier is available as an extra:
 
 ```console
-python -m pip install "lethyx[semantic]"
+python -m pip install "um-mem[semantic]"
 ```
 
 It downloads one multilingual sentence-embedding model on first use (about
 2.1 GB, CPU only, no API key) and lets a question in one script reach a record
-written in another script. `LETHYX_SEMANTIC=0` switches it off;
-`LETHYX_SEMANTIC_MODEL` and `LETHYX_SEMANTIC_CACHE_DIR` choose the model and
-where its files live. See [Quickstart](docs/lethyx/quickstart.md) for details.
+written in another script. `UM_MEM_SEMANTIC=0` switches it off;
+`UM_MEM_SEMANTIC_MODEL` and `UM_MEM_SEMANTIC_CACHE_DIR` choose the model and
+where its files live. See [Quickstart](docs/um-mem/quickstart.md) for details.
+
+## Live memory panel
+
+Run `um-memory dashboard` (or `um-memory map`) to open the local panel on the shared
+memory service. The frontend starts only on demand; use its power button or
+`um-memory dashboard --stop` to stop it while agent memory keeps working. It also
+deactivates about a minute after the last browser disconnects.
+Codex and OpenCode using the same store/workspace see the same
+canonical records. Updates arrive through an authenticated event stream without
+regenerating HTML or resetting the editor or graph. The panel includes scoped
+search, a draggable atlas with nested block navigation and real catalog links,
+paginated records, revision history, source inspection, conflict-aware editing,
+and a content-free activity/context feed.
+
+`um-memory map --output memory-map.html` and `um-memory memory-map` remain offline
+exports. See [Live panel](docs/um-mem/live_panel.md) for access, lifecycle and
+the boundaries of the context view.
 
 ## Embedded Python
 
@@ -71,7 +88,7 @@ where its files live. See [Quickstart](docs/lethyx/quickstart.md) for details.
 agent instruction channel. The MCP initialization handshake and Hermes provider expose
 the same guidance. It explains navigation, scoped recall, query refinement, explicit
 broad search and exact-scope active memory. Your model makes the semantic choices;
-Lethyx does not choose a branch from the prompt or block the primary task on recall.
+UM-MEM does not choose a branch from the prompt or block the primary task on recall.
 
 Host operator surfaces can call `MemoryClient.inspect_record(record_id,
 logical_block_id=..., expected_revision_id=...)` to inspect one exact revision.
@@ -87,7 +104,7 @@ are not opened or repaired as a side effect of unrelated current recall. Relevan
 ranking still runs through the selected native backend.
 
 ```python
-from lethyx import MemoryClient
+from um_mem import MemoryClient
 
 memory = MemoryClient(
     repo_root=".",
@@ -227,7 +244,7 @@ The read checks workspace, profile, caller scope lineage, owner, generation,
 candidate status and safety. It cannot promote records or broaden normal recall.
 
 The result labels its context `working_unverified` and reports exact record,
-revision and content hashes. `max_tokens` uses the existing Lethyx estimator;
+revision and content hashes. `max_tokens` uses the existing UM-MEM estimator;
 `max_bytes` is a hard UTF-8 limit on `rendered_context`. Metadata references are
 reported separately. Callers must inspect truncation, omitted IDs and unavailable
 IDs before treating returned context as complete. A budget too small for a card
@@ -268,8 +285,8 @@ and ordering remain authoritative and are not served from a stale cache.
 Install the MCP extra and start the packaged stdio server:
 
 ```console
-python -m pip install "lethyx[mcp]"
-lethyx mcp-server
+python -m pip install "um-mem[mcp]"
+um-memory mcp-server
 ```
 
 The portable MCP surface provides scoped health, free-topology and typed-edge
@@ -308,7 +325,7 @@ in the trusted host configuration rather than in model-generated arguments.
 
 ## Host adapters
 
-Optional adapters connect Lethyx to agent lifecycle events such as session
+Optional adapters connect UM-MEM to agent lifecycle events such as session
 start/end and observed tool outcomes. MCP remains the tools-only integration;
 an adapter adds automatic observation capture without making memory a control
 plane.
@@ -321,10 +338,10 @@ The review is advisory and cannot turn successful host work into a failure.
 
 ## Documentation
 
-- [Quickstart](docs/lethyx/quickstart.md)
-- [Operator guide](docs/lethyx/operator_guide.md)
-- [Architecture](docs/lethyx/memory_architecture.md)
-- [Hermes integration](docs/lethyx/hermes_runtime_integration_user_guide.md)
+- [Quickstart](docs/um-mem/quickstart.md)
+- [Operator guide](docs/um-mem/operator_guide.md)
+- [Architecture](docs/um-mem/memory_architecture.md)
+- [Hermes integration](docs/um-mem/hermes_runtime_integration_user_guide.md)
 
 ## Development
 

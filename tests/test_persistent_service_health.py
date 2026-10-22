@@ -1,12 +1,12 @@
 import json
 from pathlib import Path
 
-from lethyx.integrations import hermes_provider
-from lethyx.memory import mcp_call
-from lethyx.memory.backends.contracts import MemoryIndexNode
-from lethyx.memory.backends.sqlite_index import BackendSQLiteIndex
-from lethyx.memory.local_service import build_local_service_identity
-from lethyx.memory.service_policy import projection_revision_id_for_snapshot
+from um_mem.integrations import hermes_provider
+from um_mem.memory import mcp_call
+from um_mem.memory.backends.contracts import MemoryIndexNode
+from um_mem.memory.backends.sqlite_index import BackendSQLiteIndex
+from um_mem.memory.local_service import build_local_service_identity
+from um_mem.memory.service_policy import projection_revision_id_for_snapshot
 
 
 def test_backend_index_revision_changes_without_exposing_index_content(tmp_path: Path) -> None:
@@ -129,7 +129,7 @@ def test_root_map_hook_reuses_one_client_pool_and_never_spawns_per_query(
         provider.shutdown()
 
     assert json.loads(first) == json.loads(second)
-    assert json.loads(first)["lethyx_navigation"]["roots"][0]["block_id"] == (
+    assert json.loads(first)["um_mem_navigation"]["roots"][0]["block_id"] == (
         "semantic_memory_index"
     )
     assert len(pools) == 1

@@ -18,10 +18,10 @@ node_modules/
 dist/
 build/
 runs/
-benchmarks/memory_bench/.memory_bench_raw/
-benchmarks/memory_bench/workspaces/
+unused/
 .codex*
 .Lethyx/
+.UM-MEM/
 .tox/
 .coverage
 coverage.xml

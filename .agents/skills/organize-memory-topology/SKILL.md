@@ -5,7 +5,7 @@ description: Organize and evolve long-term memory by the meaning of current work
 
 # Organize Memory Topology
 
-Read `docs/lethyx/memory_architecture.md` and `docs/lethyx/data_model.md` when
+Read `docs/um-mem/memory_architecture.md` and `docs/um-mem/data_model.md` when
 the repository is available. They define the active/passive boundary and scope
 model used by this skill.
 

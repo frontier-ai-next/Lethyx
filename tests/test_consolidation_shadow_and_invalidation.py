@@ -2,8 +2,8 @@ from dataclasses import FrozenInstanceError
 
 import pytest
 
-from lethyx.contracts import ConsolidationDecision, EvidenceRef, MemoryBlockRecord
-from lethyx.memory.consolidation import (
+from um_mem.contracts import ConsolidationDecision, EvidenceRef, MemoryBlockRecord
+from um_mem.memory.consolidation import (
     CanonicalConsolidationPipeline,
     ConsolidationShadowStore,
     ConsolidationTransitionTribunal,

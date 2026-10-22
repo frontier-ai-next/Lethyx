@@ -2,8 +2,8 @@
 
 from pathlib import Path
 
-from lethyx.api import MemoryClient
-from lethyx.memory.blocks.registry import load_workspace_topology
+from um_mem.api import MemoryClient
+from um_mem.memory.blocks.registry import load_workspace_topology
 
 
 def test_archived_leaf_retraction_is_exact_recoverable_and_idempotent(tmp_path: Path) -> None:

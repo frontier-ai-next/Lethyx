@@ -1,14 +1,15 @@
 import inspect
 from dataclasses import fields
+from pathlib import Path
 from typing import get_args
 
 import pytest
 
-from lethyx import MemoryClient
-from lethyx.contracts import MemoryBlockRecord, MemoryScope
-from lethyx.contracts.memory import memory_scope_key
-from lethyx.memory.mcp_facade import lethyx_build_context, lethyx_recall
-from lethyx.memory.recall_plan import RecallPlan
+from um_mem import MemoryClient
+from um_mem.contracts import MemoryBlockRecord, MemoryScope
+from um_mem.contracts.memory import memory_scope_key
+from um_mem.memory.mcp_facade import um_mem_build_context, um_mem_recall
+from um_mem.memory.recall_plan import RecallPlan
 
 
 class _CapturingBackend:
@@ -21,8 +22,8 @@ class _CapturingBackend:
 
 
 def test_memory_read_guidance_reaches_python_mcp_and_hermes() -> None:
-    from lethyx.integrations.hermes_provider import UmMemMemoryProvider
-    from lethyx.memory.mcp_server import create_mcp_server
+    from um_mem.integrations.hermes_provider import UmMemMemoryProvider
+    from um_mem.memory.mcp_server import create_mcp_server
 
     guidance = MemoryClient.agent_instructions()
     assert create_mcp_server().instructions == guidance
@@ -96,7 +97,7 @@ def test_memory_client_sends_the_canonical_plan_to_the_selected_backend(tmp_path
 
 
 def test_mcp_recall_and_context_expose_the_same_canonical_selection_fields() -> None:
-    for function in (lethyx_recall, lethyx_build_context):
+    for function in (um_mem_recall, um_mem_build_context):
         parameters = inspect.signature(function).parameters
         assert {"record_ids", "source_horizon", "scope_chain"} <= set(parameters)
         assert {"selected_block_ids", "include_passive", "include_global"}.isdisjoint(parameters)
@@ -123,3 +124,17 @@ def test_memory_scope_is_canonical_and_user_global_requires_an_exact_user() -> N
     )
 
     assert memory_scope_key(record) == "user_global:user-a"
+
+
+def test_caller_supplied_logical_ids_remain_strict(tmp_path: Path) -> None:
+    client = MemoryClient(tmp_path, workspace_id="alpha", backend_instance=object())
+
+    plan = client.compile_recall_plan(
+        "celestial cobalt orchard",
+        logical_block_ids=["strict-leaf"],
+    )
+
+    assert plan is not None
+    assert plan.logical_block_ids == ("strict-leaf",)
+    assert plan.reason == "explicit_block_first_recall"
+    assert "routing_trace" not in plan.metadata

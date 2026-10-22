@@ -3,19 +3,19 @@ from pathlib import Path
 
 import pytest
 
-from lethyx import MemoryClient
-from lethyx.contracts import MemoryBlockRecord, RecordBlockMembership
-from lethyx.memory.backends import contracts as backend_contracts
-from lethyx.memory.backends.sqlite_index import BackendSQLiteIndex
-from lethyx.memory.backends.mempalace import _mempalace_partition_identity
-from lethyx.memory.backends.hindsight import HindsightBackend
-from lethyx.memory.backends.mnemosyne import MnemosyneBackend
-from lethyx.memory.blocks.catalog import compile_semantic_catalog
-from lethyx.memory.blocks.registry import load_memory_blocks
-from lethyx.memory.kernel.models import block_record_to_event
-from lethyx.memory.kernel.writer import _write_memory_event
-from lethyx.memory.mutation import plan_memory_mutation
-from lethyx.memory.selection import MemorySelectionPolicy, SelectionContext
+from um_mem import MemoryClient
+from um_mem.contracts import MemoryBlockRecord, RecordBlockMembership
+from um_mem.memory.backends import contracts as backend_contracts
+from um_mem.memory.backends.hindsight import HindsightBackend
+from um_mem.memory.backends.mempalace import _mempalace_partition_identity
+from um_mem.memory.backends.mnemosyne import MnemosyneBackend
+from um_mem.memory.backends.sqlite_index import BackendSQLiteIndex
+from um_mem.memory.blocks.catalog import compile_semantic_catalog
+from um_mem.memory.blocks.registry import load_memory_blocks
+from um_mem.memory.kernel.models import block_record_to_event
+from um_mem.memory.kernel.writer import _write_memory_event
+from um_mem.memory.mutation import plan_memory_mutation
+from um_mem.memory.selection import MemorySelectionPolicy, SelectionContext
 
 
 def _catalog_revision(repo_root: Path, workspace_id: str) -> str:

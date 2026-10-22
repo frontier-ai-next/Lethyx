@@ -3,13 +3,13 @@ from dataclasses import replace
 from pathlib import Path
 from typing import Any
 
-from lethyx import MemoryClient
-from lethyx.contracts import EvidenceRef, MemoryBlockRecord, RecordBlockMembership
-from lethyx.memory.backends.contracts import block_record_to_memory_hit, block_to_json
-from lethyx.memory.backends.sqlite_index import BackendSQLiteIndex
-from lethyx.memory.blocks.catalog import DynamicLabel, RefinementCase, compile_semantic_catalog
-from lethyx.memory.blocks.registry import load_memory_blocks
-from lethyx.memory.service_policy import (
+from um_mem import MemoryClient
+from um_mem.contracts import EvidenceRef, MemoryBlockRecord, RecordBlockMembership
+from um_mem.memory.backends.contracts import block_record_to_memory_hit, block_to_json
+from um_mem.memory.backends.sqlite_index import BackendSQLiteIndex
+from um_mem.memory.blocks.catalog import DynamicLabel, RefinementCase, compile_semantic_catalog
+from um_mem.memory.blocks.registry import load_memory_blocks
+from um_mem.memory.service_policy import (
     ServicePolicyBundleStore,
     baseline_memory_policy_bundle,
     catalog_snapshot_from_blocks,
@@ -45,28 +45,28 @@ def test_real_project_corpus_indexes_edges_exact_ids_and_rebuild_are_determinist
             "Packaging state",
         ),
         (
-            "docs/lethyx/operator_guide.md",
+            "docs/um-mem/operator_guide.md",
             "episode",
             "workspace_episodes",
             "episodic",
             "Operator episode",
         ),
         (
-            "docs/lethyx/quickstart.md",
+            "docs/um-mem/quickstart.md",
             "reflection_candidate",
             "reflection_candidates",
             "reflection",
             "Quickstart lesson candidate",
         ),
         (
-            "src/lethyx/api.py",
+            "src/um_mem/api.py",
             "code_chunk",
             "code_resources",
             "resource",
             "Client resource",
         ),
         (
-            "docs/lethyx/memory_architecture.md",
+            "docs/um-mem/memory_architecture.md",
             "reflection_candidate",
             "reflection_candidates",
             "reflection",
@@ -99,9 +99,9 @@ def test_real_project_corpus_indexes_edges_exact_ids_and_rebuild_are_determinist
                 metadata={
                     "path": relative_path,
                     "symbol": "MemoryClient" if relative_path.endswith("api.py") else title,
-                    "repository_id": "Lethyx",
+                    "repository_id": "UM-MEM",
                 },
-                repository_id="Lethyx",
+                repository_id="UM-MEM",
             )
             assert result.saved is True
             record = backend.get_block(result.memory_id, workspace_id="release")
@@ -129,12 +129,12 @@ def test_real_project_corpus_indexes_edges_exact_ids_and_rebuild_are_determinist
             backend.get_block(block_id, workspace_id="release").evidence_refs
             for block_id in saved_ids
         )
-        assert backend.exact_index_terms(saved_ids[4])["path"] == ("src/lethyx/api.py",)
+        assert backend.exact_index_terms(saved_ids[4])["path"] == ("src/um_mem/api.py",)
 
         exact = backend.recall(
             {
                 "workspace_id": "release",
-                "paths": ["src/lethyx/api.py"],
+                "paths": ["src/um_mem/api.py"],
                 "symbols": ["MemoryClient"],
                 "include_candidates": True,
                 "source_horizon": "durable",
@@ -143,7 +143,7 @@ def test_real_project_corpus_indexes_edges_exact_ids_and_rebuild_are_determinist
             }
         )
         assert len(exact) == 1
-        assert exact[0].metadata["path"] == "src/lethyx/api.py"
+        assert exact[0].metadata["path"] == "src/um_mem/api.py"
         assert (
             client.recall(
                 "unrelated",

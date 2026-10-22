@@ -1,16 +1,16 @@
-from pathlib import Path
-from concurrent.futures import ThreadPoolExecutor
-from types import SimpleNamespace
 import time
+from concurrent.futures import ThreadPoolExecutor
+from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
-from lethyx import MemoryClient
-from lethyx.memory.catalog_store import BlockEvolutionTarget, BlockMergeSource
+from um_mem import MemoryClient
+from um_mem.memory.catalog_store import BlockEvolutionTarget, BlockMergeSource
 
 
 def test_zvec_long_projection_batches_and_resumes_after_partial_write(monkeypatch) -> None:
-    from lethyx.memory.backends.zvec import ZvecBackend
+    from um_mem.memory.backends.zvec import ZvecBackend
 
     backend = object.__new__(ZvecBackend)
     backend._zvec = SimpleNamespace(Doc=lambda **values: SimpleNamespace(**values))

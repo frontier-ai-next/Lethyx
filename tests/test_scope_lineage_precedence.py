@@ -1,7 +1,7 @@
 import pytest
 
-from lethyx.memory.recall_plan import RecallPlan
-from lethyx.memory.scopes import (
+from um_mem.memory.recall_plan import RecallPlan
+from um_mem.memory.scopes import (
     MemoryPrecedenceCandidate,
     OrderedScopeChain,
     ScopeLineage,

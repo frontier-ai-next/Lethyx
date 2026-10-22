@@ -6,8 +6,8 @@ from pathlib import Path
 
 import pytest
 
-from lethyx import MemoryClient
-from lethyx.memory.catalog_store import WorkspaceCatalogStore
+from um_mem import MemoryClient
+from um_mem.memory.catalog_store import WorkspaceCatalogStore
 
 
 @pytest.mark.parametrize("actor", ["llm", "system"])

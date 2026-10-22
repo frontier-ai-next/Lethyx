@@ -2,8 +2,8 @@ from dataclasses import replace
 
 import pytest
 
-from lethyx import MemoryClient
-from lethyx.contracts import (
+from um_mem import MemoryClient
+from um_mem.contracts import (
     EvidenceRef,
     OriginRef,
     ProspectiveLifecycleEvent,
@@ -11,7 +11,7 @@ from lethyx.contracts import (
     ProspectiveTelemetry,
     ProspectiveTriggerPredicate,
 )
-from lethyx.memory.prospective import ProspectiveTriggerContext
+from um_mem.memory.prospective import ProspectiveTriggerContext
 
 
 def _evidence(name: str) -> tuple[EvidenceRef, ...]:

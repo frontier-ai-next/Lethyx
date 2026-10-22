@@ -2,14 +2,15 @@
 
 from __future__ import annotations
 
-from lethyx.memory import text
+from um_mem.memory import text
 
 
 def test_tokens_split_every_unicode_script() -> None:
-    value = "OpenCode → Lethyx/память: メモリ・バックエンド, ذاكرة, mémoire"
+    value = "OpenCode → UM-MEM/память: メモリ・バックエンド, ذاكرة, mémoire"
     assert text.tokens(value) == [
         "opencode",
-        "lethyx",
+        "um",
+        "mem",
         "память",
         "メモリ",
         "バックエンド",
@@ -19,7 +20,7 @@ def test_tokens_split_every_unicode_script() -> None:
 
 
 def test_normalize_is_nfkc_casefolded_and_whitespace_collapsed() -> None:
-    assert text.normalize("  Ｌｅｔｈｙｘ\tПАМЯТЬ  \n") == "lethyx память"
+    assert text.normalize("  ＵＭ－ＭＥＭ\tПАМЯТЬ  \n") == "um-mem память"
 
 
 def test_rank_finds_a_spaceless_japanese_document() -> None:
@@ -60,8 +61,8 @@ def test_rank_weights_common_terms_by_corpus_frequency() -> None:
 def test_rank_prefers_a_title_match_over_incidental_body_terms() -> None:
     documents = [
         (
-            "Lethyx local deployment and patches\n"
-            "Lethyx is installed from a local clone. Local patches add compact "
+            "UM-MEM local deployment and patches\n"
+            "UM-MEM is installed from a local clone. Local patches add compact "
             "responses, instructions, recall and a projection wait. Restart the "
             "server after editing the source. This is the deployment record."
         ),
@@ -75,7 +76,7 @@ def test_rank_prefers_a_title_match_over_incidental_body_terms() -> None:
         "where is the opencode config",
         documents,
         titles=[
-            "Lethyx local deployment and patches",
+            "UM-MEM local deployment and patches",
             "OpenCode config locations",
         ],
     )
@@ -85,7 +86,7 @@ def test_rank_prefers_a_title_match_over_incidental_body_terms() -> None:
 
 def test_rank_does_not_match_on_corpus_glue_alone() -> None:
     documents = [
-        "Lethyx is the local memory system.",
+        "UM-MEM is the local memory system.",
         "The user is on Windows.",
         "The project is local.",
         "The backend is SQLite.",
@@ -97,31 +98,19 @@ def test_rank_does_not_match_on_corpus_glue_alone() -> None:
 def test_rank_prefers_a_discriminating_title_over_incidental_long_body_terms() -> None:
     documents = [
         (
-            "Lethyx local deployment and patches\n"
-            "Lethyx is active and there are limitations. The deployment is local."
+            "UM-MEM local deployment and patches\n"
+            "UM-MEM is active and there are limitations. The deployment is local."
         ),
-        (
-            "Memory backend switched to mnemosyne\n"
-            "Lethyx runs on the mnemosyne backend."
-        ),
-        (
-            "OpenCode config locations\n"
-            "The config is local and the skills are installed."
-        ),
-        (
-            "Python and Node toolchain\n"
-            "Python is installed and the tools are local."
-        ),
-        (
-            "Installed OpenCode skills\n"
-            "Skills are installed and the config is local."
-        ),
+        ("Memory backend switched to mnemosyne\nUM-MEM runs on the mnemosyne backend."),
+        ("OpenCode config locations\nThe config is local and the skills are installed."),
+        ("Python and Node toolchain\nPython is installed and the tools are local."),
+        ("Installed OpenCode skills\nSkills are installed and the config is local."),
     ]
     ranked = text.rank(
         "what memory backend is active and what are its limitations",
         documents,
         titles=[
-            "Lethyx local deployment and patches",
+            "UM-MEM local deployment and patches",
             "Memory backend switched to mnemosyne",
             "OpenCode config locations",
             "Python and Node toolchain",
@@ -135,7 +124,7 @@ def test_rank_prefers_a_discriminating_title_over_incidental_long_body_terms() -
 
 def test_rank_keeps_a_title_anchor_when_other_script_terms_do_not_match() -> None:
     documents = [
-        "Lethyx is local.",
+        "UM-MEM is local.",
         "The config is here.",
         "Installed OpenCode skills",
         "Python is installed.",
@@ -145,7 +134,7 @@ def test_rank_keeps_a_title_anchor_when_other_script_terms_do_not_match() -> Non
         "где находится конфигурация opencode",
         documents,
         titles=[
-            "Lethyx local deployment",
+            "UM-MEM local deployment",
             "Config",
             "Installed OpenCode skills",
             "Python toolchain",

@@ -2,14 +2,14 @@ from dataclasses import replace
 
 import pytest
 
-from lethyx.contracts import CandidateVerificationSubject
-from lethyx.integrations.hermes_provider import UmMemMemoryProvider, _load_config
+from um_mem.contracts import CandidateVerificationSubject
+from um_mem.integrations.hermes_provider import UmMemMemoryProvider, _load_config
 
 
 def test_working_context_configuration_requires_an_independent_verifier(tmp_path):
     import json
 
-    directory = tmp_path / "lethyx"
+    directory = tmp_path / "um_mem"
     directory.mkdir()
     (directory / "config.json").write_text(
         json.dumps({"working_context_enabled": True}), encoding="utf-8"
@@ -27,7 +27,7 @@ def test_saved_working_configuration_is_validated_before_writing(tmp_path):
     provider = UmMemMemoryProvider()
     with pytest.raises(ValueError, match="independent"):
         provider.save_config({"working_context_enabled": True}, str(tmp_path))
-    assert not (tmp_path / "lethyx" / "config.json").exists()
+    assert not (tmp_path / "um_mem" / "config.json").exists()
 
 
 def test_semantic_review_reuses_only_the_same_fresh_subject(tmp_path, monkeypatch):

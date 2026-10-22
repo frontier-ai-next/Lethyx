@@ -6,7 +6,7 @@ from pathlib import Path
 import pytest
 import yaml
 
-from lethyx.integrations import hermes_provider
+from um_mem.integrations import hermes_provider
 
 
 def test_standalone_observer_routes_public_hooks_and_tools_to_active_provider(
@@ -35,20 +35,22 @@ def test_standalone_observer_routes_public_hooks_and_tools_to_active_provider(
         def register_tool(self, *, name, handler, **kwargs) -> None:
             self.tools[name] = {"handler": handler, **kwargs}
 
-    module = types.ModuleType("_hermes_user_memory.lethyx__source_deadbeef12345678")
+    module = types.ModuleType("_hermes_user_memory.um_mem__source_deadbeef12345678")
     module._ACTIVE_PROVIDER = Provider()
     previous = sys.modules.get(module.__name__)
     sys.modules[module.__name__] = module
     try:
         namespace: dict[str, object] = {
-            "__file__": str(tmp_path / "plugins" / "lethyx_observer" / "__init__.py")
+            "__file__": str(tmp_path / "plugins" / "um_mem_observer" / "__init__.py")
         }
-        exec(compile(hermes_provider._OBSERVER_PLUGIN_WRAPPER, "<observer>", "exec"), namespace)
+        exec(  # noqa: S102 - running the generated wrapper is what this test asserts
+            compile(hermes_provider._OBSERVER_PLUGIN_WRAPPER, "<observer>", "exec"), namespace
+        )
         context = Context()
         namespace["register"](context)
         context.callbacks["pre_tool_call"](tool_name="write_file", args={"path": "a.py"})
         context.callbacks["post_tool_call"](tool_name="write_file", result={"success": True})
-        status = json.loads(context.tools["lethyx_provider_status"]["handler"]({"verbose": False}))
+        status = json.loads(context.tools["um_mem_provider_status"]["handler"]({"verbose": False}))
     finally:
         if previous is None:
             sys.modules.pop(module.__name__, None)
@@ -60,11 +62,11 @@ def test_standalone_observer_routes_public_hooks_and_tools_to_active_provider(
         {"hook": "post", "tool_name": "write_file", "result": {"success": True}},
     ]
     assert status == {
-        "tool": "lethyx_provider_status",
+        "tool": "um_mem_provider_status",
         "args": {"verbose": False},
     }
-    assert all(tool["toolset"] == "lethyx" for tool in context.tools.values())
-    assert "lethyx_provider_remember" in context.tools
+    assert all(tool["toolset"] == "um_mem" for tool in context.tools.values())
+    assert "um_mem_provider_remember" in context.tools
 
 
 def _write_profile_with_existing_notes(root: Path) -> tuple[bytes, bytes]:
@@ -106,9 +108,9 @@ def test_hermes_installer_stages_provider_without_disabling_builtin_or_deleting_
         hermes_python=sys.executable,
     )
 
-    provider_path = profile / "plugins" / "lethyx" / "__init__.py"
+    provider_path = profile / "plugins" / "um_mem" / "__init__.py"
     manifest_path = provider_path.parent / "plugin.yaml"
-    config_path = profile / "lethyx" / "config.json"
+    config_path = profile / "um_mem" / "config.json"
     config = json.loads(config_path.read_text(encoding="utf-8"))
     manifest = yaml.safe_load(manifest_path.read_text(encoding="utf-8"))
     assert result["staged"] is True
@@ -118,7 +120,7 @@ def test_hermes_installer_stages_provider_without_disabling_builtin_or_deleting_
     assert provider_path.is_file()
     assert "python_dependencies" in manifest
     assert (
-        "lethyx" not in yaml.safe_load((profile / "config.yaml").read_text())["memory"]["provider"]
+        "um-mem" not in yaml.safe_load((profile / "config.yaml").read_text())["memory"]["provider"]
     )
     assert config["repo_root"] == str((profile / "persistent-store").resolve())
     assert config["workspace_id"] == "workspace-a"

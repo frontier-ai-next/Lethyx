@@ -2,14 +2,14 @@ from pathlib import Path
 
 import pytest
 
-from lethyx.api import MemoryClient
-from lethyx.contracts import HostObservation
-from lethyx.contracts.ledger import (
+from um_mem.api import MemoryClient
+from um_mem.contracts import HostObservation
+from um_mem.contracts.ledger import (
     append_consolidation_semantic_verification_ledger_event,
     append_verification_report_ledger_event,
 )
-from lethyx.memory.backends.contracts import EdgeType
-from lethyx.memory.backends.sqlite_index import BackendSQLiteIndex
+from um_mem.memory.backends.contracts import EdgeType
+from um_mem.memory.backends.sqlite_index import BackendSQLiteIndex
 
 
 def _observation(event_id: str, claim: str) -> HostObservation:

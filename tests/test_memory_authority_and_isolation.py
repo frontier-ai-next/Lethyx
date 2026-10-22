@@ -4,8 +4,9 @@ from pathlib import Path
 from typing import Any
 
 import pytest
-from lethyx.api import MemoryClient
-from lethyx.contracts import (
+
+from um_mem.api import MemoryClient
+from um_mem.contracts import (
     EvidenceRef,
     MemoryBlockRecord,
     MemoryEvent,
@@ -13,22 +14,22 @@ from lethyx.contracts import (
     RecordBlockMembership,
     VerificationReportRef,
 )
-from lethyx.contracts.hashing import hash_value
-from lethyx.contracts.ledger import append_verification_report_ledger_event
-from lethyx.memory.backends.base import MemoryHit
-from lethyx.memory.backends.contracts import (
-    block_record_to_memory_hit,
+from um_mem.contracts.hashing import hash_value
+from um_mem.contracts.ledger import append_verification_report_ledger_event
+from um_mem.memory.backends.base import MemoryHit
+from um_mem.memory.backends.contracts import (
     CanonicalHeadReservation,
     EdgeType,
     MemoryEdgeRecord,
+    block_record_to_memory_hit,
 )
-from lethyx.memory.backends.sqlite_index import BackendSQLiteIndex
-from lethyx.memory.blocks.catalog import compile_semantic_catalog
-from lethyx.memory.blocks.registry import load_memory_blocks
-from lethyx.memory.kernel.models import block_record_to_event
-from lethyx.memory.kernel.writer import _write_memory_event
-from lethyx.memory.mutation import plan_memory_mutation, resolve_canonical_revision_head
-from lethyx.memory.recall_plan import RecallPlan
+from um_mem.memory.backends.sqlite_index import BackendSQLiteIndex
+from um_mem.memory.blocks.catalog import compile_semantic_catalog
+from um_mem.memory.blocks.registry import load_memory_blocks
+from um_mem.memory.kernel.models import block_record_to_event
+from um_mem.memory.kernel.writer import _write_memory_event
+from um_mem.memory.mutation import plan_memory_mutation, resolve_canonical_revision_head
+from um_mem.memory.recall_plan import RecallPlan
 
 _CATALOG_REVISION = "test-catalog-revision"
 
@@ -1024,7 +1025,7 @@ def test_first_trusted_correction_rebases_after_unrelated_topology_growth(
     fresh_client: bool,
     advance_at_write: bool,
 ) -> None:
-    import lethyx.api as api
+    from um_mem import api
 
     trusted = _record(
         "trusted-fact",

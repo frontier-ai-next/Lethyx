@@ -2,11 +2,11 @@ from dataclasses import replace
 
 import pytest
 
-from lethyx import DependencyValidation, MemoryClient
-from lethyx.contracts import EvidenceRef, MemoryBlockRecord, RecordBlockMembership
-from lethyx.memory.backends.contracts import EdgeType, MemoryEdgeRecord
-from lethyx.memory.backends.sqlite_index import BackendSQLiteIndex
-from lethyx.memory.mutation import MutationDecision, plan_memory_mutation
+from um_mem import DependencyValidation, MemoryClient
+from um_mem.contracts import EvidenceRef, MemoryBlockRecord, RecordBlockMembership
+from um_mem.memory.backends.contracts import EdgeType, MemoryEdgeRecord
+from um_mem.memory.backends.sqlite_index import BackendSQLiteIndex
+from um_mem.memory.mutation import MutationDecision, plan_memory_mutation
 
 
 def _record(record_id: str) -> MemoryBlockRecord:

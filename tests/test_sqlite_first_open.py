@@ -2,8 +2,8 @@ from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from threading import Barrier
 
-from lethyx.memory.backends.sqlite_index import BackendSQLiteIndex
-from lethyx.memory.catalog_store import WorkspaceCatalogStore
+from um_mem.memory.backends.sqlite_index import BackendSQLiteIndex
+from um_mem.memory.catalog_store import WorkspaceCatalogStore
 
 
 def test_backend_index_first_open_is_safe_across_concurrent_sessions(tmp_path: Path) -> None:

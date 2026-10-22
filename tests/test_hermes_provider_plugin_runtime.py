@@ -8,15 +8,15 @@ from types import SimpleNamespace
 
 import pytest
 
-from lethyx.integrations import hermes_provider
-from lethyx.api import AmbiguousEvidenceRefError
-from lethyx.contracts import CandidateVerificationSubject, VerificationReportRef
-from lethyx.memory.backends.base import MemoryBusyError
-from lethyx.memory.backends.contracts import CanonicalHeadConflict
+from um_mem.api import AmbiguousEvidenceRefError
+from um_mem.contracts import CandidateVerificationSubject, VerificationReportRef
+from um_mem.integrations import hermes_provider
+from um_mem.memory.backends.base import MemoryBusyError
+from um_mem.memory.backends.contracts import CanonicalHeadConflict
 
 
 def test_hermes_provider_reads_caller_scoped_receipt_and_exact_record(tmp_path) -> None:
-    from lethyx.memory.local_service import (
+    from um_mem.memory.local_service import (
         build_local_service_identity,
         shutdown_local_service_listener,
     )
@@ -83,10 +83,10 @@ def test_system_prompt_is_an_operational_authoring_contract() -> None:
 def test_provider_import_does_not_eagerly_load_backend_runtime() -> None:
     script = """
 import sys
-import lethyx.integrations.hermes_provider
+import um_mem.integrations.hermes_provider
 
-assert "lethyx.memory.working_continuity" not in sys.modules
-assert "lethyx.memory.backends.mempalace" not in sys.modules
+assert "um_mem.memory.working_continuity" not in sys.modules
+assert "um_mem.memory.backends.mempalace" not in sys.modules
 """
     completed = subprocess.run(
         [sys.executable, "-c", script],
@@ -210,8 +210,8 @@ def test_active_prefetch_and_recalls_share_the_host_allowance(monkeypatch, tmp_p
     assert not calls
     provider.on_turn_start(1, "question")
     active = provider.prefetch("question", session_id="native-session")
-    assert json.loads(active)["lethyx_active"]["truncated"]
-    assert json.loads(active)["lethyx_active"]["mask_id"] == "mask"
+    assert json.loads(active)["um_mem_active"]["truncated"]
+    assert json.loads(active)["um_mem_active"]["mask_id"] == "mask"
     outputs = [active]
     for _ in range(20):
         outputs.append(
@@ -261,9 +261,9 @@ def test_late_prefetch_does_not_charge_or_deliver_to_a_new_host_turn(monkeypatch
 def test_packaged_provider_installs_thin_hermes_wrapper(tmp_path: Path) -> None:
     wrapper = hermes_provider.install_hermes_plugin(tmp_path, overwrite=True)
 
-    assert wrapper == tmp_path / "plugins" / "lethyx" / "__init__.py"
+    assert wrapper == tmp_path / "plugins" / "um_mem" / "__init__.py"
     source = wrapper.read_text(encoding="utf-8")
-    assert "lethyx.integrations.hermes_provider" in source
+    assert "um_mem.integrations.hermes_provider" in source
     assert "UmMemMemoryProvider" in source
 
 
@@ -272,9 +272,9 @@ def test_provider_defaults_have_no_query_prefetch_or_cache_configuration(
     tmp_path: Path,
 ) -> None:
     monkeypatch.setenv("HERMES_HOME", str(tmp_path / "hermes"))
-    monkeypatch.delenv("LETHYX_CODE_ROOT", raising=False)
-    monkeypatch.delenv("LETHYX_REPO_ROOT", raising=False)
-    monkeypatch.delenv("LETHYX_OBSIDIAN_VAULT", raising=False)
+    monkeypatch.delenv("UM_MEM_CODE_ROOT", raising=False)
+    monkeypatch.delenv("UM_MEM_REPO_ROOT", raising=False)
+    monkeypatch.delenv("UM_MEM_OBSIDIAN_VAULT", raising=False)
 
     config = hermes_provider._load_config()
 
@@ -302,10 +302,10 @@ def test_prefetch_only_provider_exposes_no_parallel_memory_tool_path() -> None:
     }
 
     assert provider.get_tool_schemas() == []
-    denied = json.loads(provider.handle_tool_call("lethyx_provider_search_all", {"query": "x"}))
+    denied = json.loads(provider.handle_tool_call("um_mem_provider_search_all", {"query": "x"}))
     assert denied == {
         "ok": False,
-        "error": "Lethyx provider tools are disabled by the managed session grant",
+        "error": "UM-MEM provider tools are disabled by the managed session grant",
     }
 
 
@@ -321,13 +321,13 @@ def test_provider_preserves_virtual_environment_interpreter(
         if os.name == "nt" and exc.winerror == 1314:
             pytest.skip("Creating symlinks requires Windows developer mode")
         raise
-    config_dir = tmp_path / "lethyx"
+    config_dir = tmp_path / "um_mem"
     config_dir.mkdir()
     (config_dir / "config.json").write_text(
         json.dumps({"python_executable": "venv/bin/python"}), encoding="utf-8"
     )
     monkeypatch.chdir(tmp_path)
-    monkeypatch.delenv("LETHYX_ALLOW_ENV_CONFIG_OVERRIDE", raising=False)
+    monkeypatch.delenv("UM_MEM_ALLOW_ENV_CONFIG_OVERRIDE", raising=False)
     provider = hermes_provider.UmMemMemoryProvider()
     provider._config = hermes_provider._load_config(tmp_path)
 
@@ -445,7 +445,7 @@ def test_compact_recall_keeps_actionable_temporal_validation_error(monkeypatch):
     )
     result = json.loads(
         provider.handle_tool_call(
-            "lethyx_provider_recall_blocks",
+            "um_mem_provider_recall_blocks",
             {
                 "query": "evidence",
                 "logical_block_ids": ["leaf"],
@@ -612,14 +612,14 @@ def test_profile_recall_budget_is_not_inflated_by_defaults_or_ambient_environmen
     monkeypatch,
     tmp_path,
 ) -> None:
-    config_dir = tmp_path / "lethyx"
+    config_dir = tmp_path / "um_mem"
     config_dir.mkdir()
     (config_dir / "config.json").write_text(
         json.dumps({"recall_max_tokens": 17}),
         encoding="utf-8",
     )
-    monkeypatch.setenv("LETHYX_PROVIDER_RECALL_MAX_TOKENS", "8000")
-    monkeypatch.delenv("LETHYX_ALLOW_ENV_CONFIG_OVERRIDE", raising=False)
+    monkeypatch.setenv("UM_MEM_PROVIDER_RECALL_MAX_TOKENS", "8000")
+    monkeypatch.delenv("UM_MEM_ALLOW_ENV_CONFIG_OVERRIDE", raising=False)
     provider = hermes_provider.UmMemMemoryProvider()
     provider._config = hermes_provider._load_config(tmp_path)
 
@@ -739,7 +739,7 @@ def test_verified_loaded_skill_and_stable_task_manifests_are_content_free() -> N
         "project_path": "",
         "loaded_skill_manifest": {
             "verified": True,
-            "skills": ["lethyx-project", "lethyx-python-discipline"],
+            "skills": ["um-mem-project", "um-mem-python-discipline"],
         },
         "task_id": "task-7",
         "checkpoint_id": "checkpoint-2",
@@ -749,8 +749,8 @@ def test_verified_loaded_skill_and_stable_task_manifests_are_content_free() -> N
     pointers = provider._resource_pointer_summary()
 
     assert pointers["skills_index"]["loaded_skill_ids"] == [
-        "lethyx-project",
-        "lethyx-python-discipline",
+        "um-mem-project",
+        "um-mem-python-discipline",
     ]
     assert pointers["skills_index"]["manifest_sha256"].startswith("sha256:")
     assert pointers["task_state"]["task_id_sha256"].startswith("sha256:")
@@ -834,26 +834,26 @@ def test_provider_tools_enforce_block_first_recall_and_selected_block_write(
 
     schema_by_name = {schema["name"]: schema for schema in provider.get_tool_schemas()}
     assert {
-        "lethyx_provider_block_map",
-        "lethyx_provider_expand_block",
-        "lethyx_provider_recall_blocks",
-        "lethyx_provider_search_all",
-        "lethyx_provider_read_exact_record",
-        "lethyx_provider_read_exact_records",
-        "lethyx_provider_operation_status",
-        "lethyx_provider_projection_barrier",
-        "lethyx_provider_list_records",
-        "lethyx_provider_remember",
-        "lethyx_provider_amend",
-        "lethyx_provider_create_block",
-        "lethyx_provider_amend_block",
-        "lethyx_provider_archive_block",
-        "lethyx_provider_propose_promotion",
-        "lethyx_provider_recent_verification",
-        "lethyx_provider_export_graph",
+        "um_mem_provider_block_map",
+        "um_mem_provider_expand_block",
+        "um_mem_provider_recall_blocks",
+        "um_mem_provider_search_all",
+        "um_mem_provider_read_exact_record",
+        "um_mem_provider_read_exact_records",
+        "um_mem_provider_operation_status",
+        "um_mem_provider_projection_barrier",
+        "um_mem_provider_list_records",
+        "um_mem_provider_remember",
+        "um_mem_provider_amend",
+        "um_mem_provider_create_block",
+        "um_mem_provider_amend_block",
+        "um_mem_provider_archive_block",
+        "um_mem_provider_propose_promotion",
+        "um_mem_provider_recent_verification",
+        "um_mem_provider_export_graph",
     } <= set(schema_by_name)
-    assert "lethyx_provider_recall" not in schema_by_name
-    assert set(schema_by_name["lethyx_provider_recall_blocks"]["parameters"]["properties"]) == {
+    assert "um_mem_provider_recall" not in schema_by_name
+    assert set(schema_by_name["um_mem_provider_recall_blocks"]["parameters"]["properties"]) == {
         "query",
         "logical_block_ids",
         "limit",
@@ -867,7 +867,7 @@ def test_provider_tools_enforce_block_first_recall_and_selected_block_write(
         "known_as_of",
         "revision_id",
     }
-    assert set(schema_by_name["lethyx_provider_search_all"]["parameters"]["properties"]) == {
+    assert set(schema_by_name["um_mem_provider_search_all"]["parameters"]["properties"]) == {
         "query",
         "limit",
         "source_horizon",
@@ -879,12 +879,12 @@ def test_provider_tools_enforce_block_first_recall_and_selected_block_write(
         "known_as_of",
         "revision_id",
     }
-    assert set(schema_by_name["lethyx_provider_remember"]["parameters"]["required"]) == {
+    assert set(schema_by_name["um_mem_provider_remember"]["parameters"]["required"]) == {
         "content",
         "operation",
         "requested_block_id",
     }
-    assert set(schema_by_name["lethyx_provider_remember"]["parameters"]["properties"]) == {
+    assert set(schema_by_name["um_mem_provider_remember"]["parameters"]["properties"]) == {
         "content",
         "requested_block_id",
         "title",
@@ -899,29 +899,29 @@ def test_provider_tools_enforce_block_first_recall_and_selected_block_write(
         "source_segments",
         "operation_id",
     }
-    remember_parameters = schema_by_name["lethyx_provider_remember"]["parameters"]
+    remember_parameters = schema_by_name["um_mem_provider_remember"]["parameters"]
     assert "default" not in remember_parameters["properties"]["operation"]
     assert len(remember_parameters["oneOf"]) == 3
 
     exact = json.loads(
-        provider.handle_tool_call("lethyx_provider_read_exact_record", {"record_id": "record-1"})
+        provider.handle_tool_call("um_mem_provider_read_exact_record", {"record_id": "record-1"})
     )
     assert exact["ok"] is True
     assert calls[-1] == ("read_exact_record", {"record_id": "record-1"})
     invalid_batch = json.loads(
         provider.handle_tool_call(
-            "lethyx_provider_read_exact_records", {"record_ids": ["record-1", "record-1"]}
+            "um_mem_provider_read_exact_records", {"record_ids": ["record-1", "record-1"]}
         )
     )
     assert invalid_batch["ok"] is False
     status = json.loads(
-        provider.handle_tool_call("lethyx_provider_operation_status", {"operation_id": "op-1"})
+        provider.handle_tool_call("um_mem_provider_operation_status", {"operation_id": "op-1"})
     )
     assert status["ok"] is True
     assert calls[-1] == ("operation_status", {"operation_id": "op-1"})
     listed = json.loads(
         provider.handle_tool_call(
-            "lethyx_provider_list_records", {"scope": "workspace", "scope_id": "alpha", "limit": 2}
+            "um_mem_provider_list_records", {"scope": "workspace", "scope_id": "alpha", "limit": 2}
         )
     )
     assert listed["ok"] is True
@@ -929,14 +929,14 @@ def test_provider_tools_enforce_block_first_recall_and_selected_block_write(
     calls.clear()
 
     unscoped = json.loads(
-        provider.handle_tool_call("lethyx_provider_recall_blocks", {"query": "parser"})
+        provider.handle_tool_call("um_mem_provider_recall_blocks", {"query": "parser"})
     )
     assert unscoped["error"] == "logical_block_ids must be a nonempty array"
     assert calls == []
 
     recalled = json.loads(
         provider.handle_tool_call(
-            "lethyx_provider_recall_blocks",
+            "um_mem_provider_recall_blocks",
             {"query": "parser", "logical_block_ids": ["code_resources"]},
         )
     )
@@ -947,7 +947,7 @@ def test_provider_tools_enforce_block_first_recall_and_selected_block_write(
 
     temporal = json.loads(
         provider.handle_tool_call(
-            "lethyx_provider_recall_blocks",
+            "um_mem_provider_recall_blocks",
             {
                 "query": "parser",
                 "logical_block_ids": ["code_resources"],
@@ -960,7 +960,7 @@ def test_provider_tools_enforce_block_first_recall_and_selected_block_write(
     assert calls[-1][1]["retrieval_mode"] == "semantic"
 
     searched = json.loads(
-        provider.handle_tool_call("lethyx_provider_search_all", {"query": "parser"})
+        provider.handle_tool_call("um_mem_provider_search_all", {"query": "parser"})
     )
     assert searched["ok"] is True
     assert calls[-1][1]["search_all"] is True
@@ -968,20 +968,20 @@ def test_provider_tools_enforce_block_first_recall_and_selected_block_write(
 
     mixed = json.loads(
         provider.handle_tool_call(
-            "lethyx_provider_search_all",
+            "um_mem_provider_search_all",
             {"query": "parser", "logical_block_ids": ["code_resources"]},
         )
     )
     assert mixed["error"] == "unknown Hermes provider search_all argument: logical_block_ids"
 
     missing_block = json.loads(
-        provider.handle_tool_call("lethyx_provider_remember", {"content": "fact"})
+        provider.handle_tool_call("um_mem_provider_remember", {"content": "fact"})
     )
     assert missing_block["error"] == "requested_block_id is required"
 
     missing_operation = json.loads(
         provider.handle_tool_call(
-            "lethyx_provider_remember",
+            "um_mem_provider_remember",
             {"content": "fact", "requested_block_id": "stable_project_facts"},
         )
     )
@@ -990,7 +990,7 @@ def test_provider_tools_enforce_block_first_recall_and_selected_block_write(
 
     ambiguous_add = json.loads(
         provider.handle_tool_call(
-            "lethyx_provider_remember",
+            "um_mem_provider_remember",
             {
                 "content": "must not become a second current fact",
                 "operation": "add",
@@ -1004,7 +1004,7 @@ def test_provider_tools_enforce_block_first_recall_and_selected_block_write(
 
     added = json.loads(
         provider.handle_tool_call(
-            "lethyx_provider_remember",
+            "um_mem_provider_remember",
             {
                 "content": "new durable fact",
                 "operation": "add",
@@ -1022,7 +1022,7 @@ def test_provider_tools_enforce_block_first_recall_and_selected_block_write(
     calls_before_repair = len(calls)
     repaired = json.loads(
         provider.handle_tool_call(
-            "lethyx_provider_remember",
+            "um_mem_provider_remember",
             {
                 "content": "new durable fact",
                 "operation": "repair",
@@ -1049,7 +1049,7 @@ def test_provider_tools_enforce_block_first_recall_and_selected_block_write(
 
     corrected = json.loads(
         provider.handle_tool_call(
-            "lethyx_provider_remember",
+            "um_mem_provider_remember",
             {
                 "content": "corrected fact",
                 "operation": "correct",
@@ -1067,7 +1067,7 @@ def test_provider_tools_enforce_block_first_recall_and_selected_block_write(
 
     amended = json.loads(
         provider.handle_tool_call(
-            "lethyx_provider_amend",
+            "um_mem_provider_amend",
             {
                 "memory_id": "memory-1",
                 "expected_revision": "revision-1",
@@ -1084,7 +1084,7 @@ def test_provider_tools_enforce_block_first_recall_and_selected_block_write(
 
     created_block = json.loads(
         provider.handle_tool_call(
-            "lethyx_provider_create_block",
+            "um_mem_provider_create_block",
             {
                 "name": "Research findings",
                 "synopsis": "Verified research evidence.",
@@ -1158,7 +1158,7 @@ def test_provider_tools_enforce_block_first_recall_and_selected_block_write(
     )
     promoted = json.loads(
         provider.handle_tool_call(
-            "lethyx_provider_propose_promotion",
+            "um_mem_provider_propose_promotion",
             {
                 "memory_id": "reflection-1",
                 "expected_source_revision_id": "reflection-revision-1",
@@ -1172,14 +1172,14 @@ def test_provider_tools_enforce_block_first_recall_and_selected_block_write(
     assert promoted["status"] == "accepted"
     assert promoted["authority"] == "advisory"
     assert promoted["verification_status"] == "verified"
-    recent = json.loads(provider.handle_tool_call("lethyx_provider_recent_verification", {}))
+    recent = json.loads(provider.handle_tool_call("um_mem_provider_recent_verification", {}))
     assert recent == {
         "ok": True,
         "verification_reports": [],
         "passed_count": 0,
     }
 
-    exported = json.loads(provider.handle_tool_call("lethyx_provider_export_graph", {}))
+    exported = json.loads(provider.handle_tool_call("um_mem_provider_export_graph", {}))
     assert exported["ok"] is True
     assert calls[-1] == ("export_graph", {})
 
@@ -1326,7 +1326,7 @@ def test_post_tool_call_captures_live_test_receipt_for_promotion(
     assert captured[0]["event_kind"] == "test_passed"
     assert captured[0]["workspace_root"] == str(tmp_path)
     assert captured[0]["changed_files"] == ["src/a.py"]
-    recent = json.loads(provider.handle_tool_call("lethyx_provider_recent_verification", {}))
+    recent = json.loads(provider.handle_tool_call("um_mem_provider_recent_verification", {}))
     assert recent["verification_reports"] == [report]
     assert recent["passed_count"] == 1
 
@@ -1638,7 +1638,7 @@ def test_provider_tool_outcomes_exclude_its_own_results() -> None:
                 "tool_calls": [
                     {
                         "id": "memory-call",
-                        "function": {"name": "lethyx_provider_remember"},
+                        "function": {"name": "um_mem_provider_remember"},
                     },
                     {"id": "shell-call", "function": {"name": "shell"}},
                 ],
@@ -1885,7 +1885,7 @@ def test_native_remember_identity_uses_invocation_and_preserves_author(tmp_path,
     for invocation in ("call-a", "call-b", "call-a"):
         result = json.loads(
             provider.handle_tool_call(
-                "lethyx_provider_remember",
+                "um_mem_provider_remember",
                 proposal,
                 tool_call_id=invocation,
                 author_model="author-a",

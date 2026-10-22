@@ -62,10 +62,10 @@ jobs:
           from pathlib import Path
           from zipfile import ZipFile
 
-          wheel = next(Path("dist").glob("lethyx-*.whl"))
+          wheel = next(Path("dist").glob("um_mem-*.whl"))
           required = {
-              "lethyx/memory/blocks/default_blocks.yaml",
-              "lethyx/memory/blocks/taxonomy.yaml",
+              "um_mem/memory/blocks/default_blocks.yaml",
+              "um_mem/memory/blocks/taxonomy.yaml",
           }
           with ZipFile(wheel) as archive:
               names = set(archive.namelist())

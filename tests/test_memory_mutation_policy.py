@@ -7,27 +7,27 @@ from datetime import UTC, datetime, timedelta
 
 import pytest
 
-from lethyx import MemoryClient
-from lethyx.contracts import (
+from um_mem import MemoryClient
+from um_mem.contracts import (
     ConsolidationCommitReceipt,
     EvidenceRef,
     MemoryBlockRecord,
     MemoryEvent,
     RecordBlockMembership,
 )
-from lethyx.memory.backends.contracts import (
+from um_mem.memory import mcp_facade
+from um_mem.memory.backends.contracts import (
     EdgeType,
     MemoryEdgeRecord,
     memory_event_to_block_record,
 )
-from lethyx.memory.backends.sqlite_index import BackendSQLiteIndex
-from lethyx.memory.blocks.catalog import compile_semantic_catalog
-from lethyx.memory.blocks.registry import load_memory_blocks
-from lethyx.memory.kernel.models import block_record_to_event
-from lethyx.memory.kernel.telemetry import read_memory_events
-from lethyx.memory.kernel.writer import _write_memory_event
-from lethyx.memory import mcp_facade
-from lethyx.memory.mutation import (
+from um_mem.memory.backends.sqlite_index import BackendSQLiteIndex
+from um_mem.memory.blocks.catalog import compile_semantic_catalog
+from um_mem.memory.blocks.registry import load_memory_blocks
+from um_mem.memory.kernel.models import block_record_to_event
+from um_mem.memory.kernel.telemetry import read_memory_events
+from um_mem.memory.kernel.writer import _write_memory_event
+from um_mem.memory.mutation import (
     CanonicalMutationIdentity,
     plan_lifecycle_mutation,
     plan_memory_mutation,
@@ -141,13 +141,13 @@ def test_event_time_unknown_survives_historical_recall_and_reopen(tmp_path, temp
     index = BackendSQLiteIndex(path, backend_id="test", workspace_id="alpha")
     try:
         client = MemoryClient(tmp_path, workspace_id="alpha", backend_instance=index)
-        query = dict(
-            temporal_mode=temporal_mode,
-            as_of="2023-05-30T23:42:00Z",
-            record_ids=[saved.memory_id],
-            logical_block_ids=["stable_project_facts"],
-            include_candidates=True,
-        )
+        query = {
+            "temporal_mode": temporal_mode,
+            "as_of": "2023-05-30T23:42:00Z",
+            "record_ids": [saved.memory_id],
+            "logical_block_ids": ["stable_project_facts"],
+            "include_candidates": True,
+        }
         hits = client.recall("expedition", **query)
         assert [hit.metadata["block_id"] for hit in hits] == [saved.memory_id]
         assert hits[0].metadata["event_time_status"] == "unknown"
@@ -222,18 +222,18 @@ def test_unknown_start_keeps_correction_end_without_changing_knowledge_snapshot(
     )
     successor = index.get_block(str(corrected["block_id"]))
     assert successor is not None
-    boundary = datetime.fromisoformat(successor.valid_from.replace("Z", "+00:00"))
+    boundary = datetime.fromisoformat(successor.valid_from)
     index.close()
     index = BackendSQLiteIndex(path, backend_id="test", workspace_id="alpha")
     try:
-        query = dict(
-            query="",
-            workspace_id="alpha",
-            scope_chain=["workspace:alpha"],
-            record_ids=[first.memory_id, successor.block_id],
-            include_candidates=True,
-            temporal_mode="historical",
-        )
+        query = {
+            "query": "",
+            "workspace_id": "alpha",
+            "scope_chain": ["workspace:alpha"],
+            "record_ids": [first.memory_id, successor.block_id],
+            "include_candidates": True,
+            "temporal_mode": "historical",
+        }
         assert [
             r.block_id
             for r in index.recall(
@@ -316,7 +316,7 @@ def test_known_as_of_uses_trusted_commit_time_before_event_time(tmp_path, monkey
         ] == [first.memory_id]
         monkeypatch.setattr(mcp_facade, "_client", lambda **_kwargs: client)
         monkeypatch.setattr(mcp_facade, "_close_client", lambda _client: None)
-        mcp_result = mcp_facade.lethyx_recall(
+        mcp_result = mcp_facade.um_mem_recall(
             "",
             workspace_id="alpha",
             repo_root=str(tmp_path),
@@ -1148,7 +1148,7 @@ def test_expiry_or_cap_preserves_canonical_head_after_uncommitted_crash(
     trigger: str,
 ) -> None:
     if trigger == "cap":
-        monkeypatch.setenv("LETHYX_BACKEND_INDEX_MAX_ROWS", "1")
+        monkeypatch.setenv("UM_MEM_BACKEND_INDEX_MAX_ROWS", "1")
     index = BackendSQLiteIndex(tmp_path / "memory.sqlite", backend_id="test", workspace_id="alpha")
     try:
         root = _write_planned_record(
@@ -1293,10 +1293,10 @@ def test_revision_journal_keeps_content_free_head_linkage_after_reopen(tmp_path)
 
 
 def test_pending_creation_recovers_original_after_amend(tmp_path, monkeypatch) -> None:
-    from lethyx import api
+    from um_mem import api
 
     index = BackendSQLiteIndex(
-        tmp_path / ".Lethyx" / "memory.sqlite", backend_id="test", workspace_id="alpha"
+        tmp_path / ".UM-MEM" / "memory.sqlite", backend_id="test", workspace_id="alpha"
     )
     try:
         client = MemoryClient(tmp_path, workspace_id="alpha", backend_instance=index)
@@ -1340,7 +1340,7 @@ def test_pending_creation_recovers_original_after_amend(tmp_path, monkeypatch) -
 def test_creation_status_recovers_after_reopen_when_caller_receipt_was_lost(
     tmp_path, monkeypatch
 ) -> None:
-    from lethyx import api
+    from um_mem import api
 
     path = tmp_path / "index.sqlite"
     index = BackendSQLiteIndex(path, backend_id="test", workspace_id="alpha")
@@ -1385,10 +1385,10 @@ def test_creation_status_recovers_after_reopen_when_caller_receipt_was_lost(
 
 
 def test_creation_receipt_replays_after_leaf_archival(tmp_path) -> None:
-    from lethyx.memory.blocks.registry import load_workspace_topology, create_workspace_block
+    from um_mem.memory.blocks.registry import create_workspace_block, load_workspace_topology
 
     index = BackendSQLiteIndex(
-        tmp_path / ".Lethyx" / "memory.sqlite", backend_id="test", workspace_id="alpha"
+        tmp_path / ".UM-MEM" / "memory.sqlite", backend_id="test", workspace_id="alpha"
     )
     try:
         client = MemoryClient(tmp_path, workspace_id="alpha", backend_instance=index)

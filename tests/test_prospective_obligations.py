@@ -3,23 +3,23 @@ from datetime import UTC, datetime
 
 import pytest
 
-from lethyx import MemoryClient
-from lethyx.contracts import (
+from um_mem import MemoryClient
+from um_mem.contracts import (
     AuthenticatedHostEvent,
     EvidenceRef,
     OriginRef,
-    ProspectiveObligation,
     ProspectiveLifecycleEvent,
+    ProspectiveObligation,
     ProspectiveTelemetry,
     ProspectiveTriggerPredicate,
 )
-from lethyx.memory.prospective import (
+from um_mem.memory.backends.hindsight import HindsightBackend
+from um_mem.memory.backends.mempalace import MemPalaceBackend
+from um_mem.memory.backends.mnemosyne import MnemosyneBackend
+from um_mem.memory.prospective import (
     ProspectiveTriggerContext,
     evaluate_prospective_trigger,
 )
-from lethyx.memory.backends.hindsight import HindsightBackend
-from lethyx.memory.backends.mempalace import MemPalaceBackend
-from lethyx.memory.backends.mnemosyne import MnemosyneBackend
 
 
 def _evidence(name: str) -> tuple[EvidenceRef, ...]:

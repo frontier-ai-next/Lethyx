@@ -7,10 +7,10 @@ import time
 from pathlib import Path
 
 import pytest
-from lethyx.api import MemoryClient
-from lethyx.contracts.ledger import append_candidate_semantic_verification_ledger_event
 
-from lethyx.memory.local_service import (
+from um_mem.api import MemoryClient
+from um_mem.contracts.ledger import append_candidate_semantic_verification_ledger_event
+from um_mem.memory.local_service import (
     _process_is_alive,
     build_local_service_identity,
     local_service_registry,
@@ -107,17 +107,35 @@ def _keep_embedding_models_out_of_the_test_suite():
     """
 
     previous = {
-        name: os.environ.get(name)
-        for name in ("MNEMOSYNE_NO_EMBEDDINGS", "LETHYX_SEMANTIC")
+        name: os.environ.get(name) for name in ("MNEMOSYNE_NO_EMBEDDINGS", "UM_MEM_SEMANTIC")
     }
     os.environ["MNEMOSYNE_NO_EMBEDDINGS"] = "1"
-    os.environ["LETHYX_SEMANTIC"] = "0"
+    os.environ["UM_MEM_SEMANTIC"] = "0"
     yield
     for name, value in previous.items():
         if value is None:
             os.environ.pop(name, None)
         else:
             os.environ[name] = value
+
+
+@pytest.fixture(autouse=True)
+def _isolate_user_config(tmp_path_factory, monkeypatch):
+    """Never read or write the developer's real ``~/.um-mem`` during tests.
+
+    The CLI resolves defaults from the user config file, so an unisolated run
+    silently depends on whoever executes the suite.
+    """
+
+    monkeypatch.setenv("UM_MEM_HOME", str(tmp_path_factory.mktemp("um_mem_home")))
+    for name in (
+        "UM_MEM_CONFIG",
+        "UM_MEM_BACKEND",
+        "UM_MEM_WORKSPACE",
+        "UM_MEM_PROFILE",
+        "UM_MEM_REPO_ROOT",
+    ):
+        monkeypatch.delenv(name, raising=False)
 
 
 @pytest.fixture(autouse=True)

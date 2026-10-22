@@ -1,21 +1,21 @@
 import sqlite3
+from datetime import UTC, datetime, timedelta
 from hashlib import sha256
-from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 import pytest
-import lethyx.memory.backends.sqlite_index as sqlite_index_module
 
-from lethyx.api import MemoryClient
-from lethyx.contracts import EvidenceRef
-from lethyx.memory.backends.contracts import (
+import um_mem.memory.backends.sqlite_index as sqlite_index_module
+from um_mem.api import MemoryClient
+from um_mem.contracts import EvidenceRef
+from um_mem.memory.backends.contracts import (
     ALLOWED_EDGE_TYPES,
     EdgeType,
     MemoryEdgeRecord,
     MemoryIndexNode,
 )
-from lethyx.memory.backends.sqlite_index import SQLITE_INDEX_SCHEMA_VERSION, BackendSQLiteIndex
-from lethyx.memory.blocks.catalog import (
+from um_mem.memory.backends.sqlite_index import SQLITE_INDEX_SCHEMA_VERSION, BackendSQLiteIndex
+from um_mem.memory.blocks.catalog import (
     DynamicLabel,
     RefinementCase,
     admit_dynamic_label,
@@ -23,7 +23,7 @@ from lethyx.memory.blocks.catalog import (
     compile_semantic_catalog,
     descriptor_from_index_node,
 )
-from lethyx.memory.blocks.registry import load_memory_blocks
+from um_mem.memory.blocks.registry import load_memory_blocks
 
 
 def test_new_sqlite_index_installs_busy_timeout_before_wal(
@@ -359,7 +359,7 @@ def test_descriptor_write_and_catalog_snapshot_do_not_decode_whole_leaf(
 def test_dynamic_labels_enforce_immediate_local_scope_workspace_ttl_and_global_gate(
     tmp_path: Path,
 ) -> None:
-    now = datetime(2026, 7, 14, 19, 45, tzinfo=timezone.utc)
+    now = datetime(2026, 7, 14, 19, 45, tzinfo=UTC)
     task_label = DynamicLabel(
         label_id="label:parser-repair",
         label="parser repair",

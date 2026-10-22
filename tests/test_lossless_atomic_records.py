@@ -5,13 +5,13 @@ import time
 
 import pytest
 
-from lethyx import MemoryClient
-from lethyx.integrations.hermes_provider import UmMemMemoryProvider
-from lethyx.memory.backends.sqlite_index import BackendSQLiteIndex
-from lethyx.memory.backends.hindsight import HindsightBackend
-from lethyx.memory.backends.mempalace import MemPalaceBackend
-from lethyx.memory.backends.mnemosyne import MnemosyneBackend
-from lethyx.memory.service_receipts import claim_remember_receipt, complete_remember_receipt
+from um_mem import MemoryClient
+from um_mem.integrations.hermes_provider import UmMemMemoryProvider
+from um_mem.memory.backends.hindsight import HindsightBackend
+from um_mem.memory.backends.mempalace import MemPalaceBackend
+from um_mem.memory.backends.mnemosyne import MnemosyneBackend
+from um_mem.memory.backends.sqlite_index import BackendSQLiteIndex
+from um_mem.memory.service_receipts import claim_remember_receipt, complete_remember_receipt
 
 
 def test_projection_barrier_ignores_another_pending_record(tmp_path) -> None:
@@ -126,7 +126,7 @@ def test_provider_exposes_and_forwards_lossless_segments(monkeypatch):
     provider = UmMemMemoryProvider()
     provider._config = {"workspace_id": "ws", "backend": "mempalace"}
     provider._session_id = "session"
-    schema = next(s for s in provider.get_tool_schemas() if s["name"] == "lethyx_provider_remember")
+    schema = next(s for s in provider.get_tool_schemas() if s["name"] == "um_mem_provider_remember")
     assert "lossless_atomic" in schema["parameters"]["properties"]["write_mode"]["enum"]
     segment_properties = schema["parameters"]["properties"]["source_segments"]["items"][
         "properties"
@@ -144,7 +144,7 @@ def test_provider_exposes_and_forwards_lossless_segments(monkeypatch):
     ]
     result = json.loads(
         provider.handle_tool_call(
-            "lethyx_provider_remember",
+            "um_mem_provider_remember",
             {
                 "content": "exact text",
                 "operation": "add",
@@ -184,7 +184,7 @@ def test_provider_preserves_retryable_witness_failure_without_attempting_semanti
     monkeypatch.setattr(provider, "_remember_and_export", lambda *a, **k: writes.append(a))
     result = json.loads(
         provider.handle_tool_call(
-            "lethyx_provider_remember",
+            "um_mem_provider_remember",
             {
                 "content": "exact",
                 "operation": "add",
@@ -301,7 +301,7 @@ def test_lossless_atomic_record_survives_reopen_and_reports_coverage(
 
 
 def test_exact_evidence_ref_rejects_ambiguous_records(tmp_path) -> None:
-    from lethyx.api import AmbiguousEvidenceRefError
+    from um_mem.api import AmbiguousEvidenceRefError
 
     index = BackendSQLiteIndex(tmp_path / "index.sqlite", backend_id="test", workspace_id="ws")
     client = MemoryClient(tmp_path, workspace_id="ws", backend_instance=index)
@@ -371,15 +371,15 @@ def test_operation_status_reads_original_creation_receipt_after_reopen(tmp_path)
 def test_operation_status_keeps_access_denial_terminal(tmp_path) -> None:
     index = BackendSQLiteIndex(tmp_path / "index.sqlite", backend_id="test", workspace_id="ws")
     client = MemoryClient(tmp_path, workspace_id="ws", backend_instance=index)
-    identity = dict(
-        workspace_id="ws",
-        profile_id="default",
-        backend=client._backend_id(),
-        caller_role="memory_client",
-        protocol_version=2,
-        mutation_correlation_id="denied-1",
-        arguments={"tool": "remember"},
-    )
+    identity = {
+        "workspace_id": "ws",
+        "profile_id": "default",
+        "backend": client._backend_id(),
+        "caller_role": "memory_client",
+        "protocol_version": 2,
+        "mutation_correlation_id": "denied-1",
+        "arguments": {"tool": "remember"},
+    }
     try:
         assert claim_remember_receipt(tmp_path, **identity)[0] == "new"
         complete_remember_receipt(

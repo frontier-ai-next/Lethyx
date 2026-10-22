@@ -2,8 +2,8 @@ from dataclasses import replace
 
 import pytest
 
-from lethyx import MemoryClient
-from lethyx.contracts import (
+from um_mem import MemoryClient
+from um_mem.contracts import (
     EvidenceRef,
     MemoryDecisionEvent,
     MemoryDecisionTrace,
@@ -13,8 +13,8 @@ from lethyx.contracts import (
     TransferEnvelope,
     UtilitySelectionCandidate,
 )
-from lethyx.memory.blocks import RefinementCase
-from lethyx.memory.refinement import (
+from um_mem.memory.blocks import RefinementCase
+from um_mem.memory.refinement import (
     build_memory_outcome_report,
     evaluate_advisory_association,
     generate_refinement_case,
@@ -98,7 +98,7 @@ def _credit(
         approval_principal_id="",
         task_family="repair",
         stage="verification",
-        project_id="lethyx",
+        project_id="um-mem",
         host_id="codex",
         profile_id="deep-harness",
         independence_domain=domain,
@@ -130,16 +130,16 @@ def test_procedure_reuse_requires_same_signature_or_qualified_transfer() -> None
     envelope = TransferEnvelope(
         envelope_id="transfer-procedure-1",
         status="accepted",
-        source_scope="workspace:lethyx",
+        source_scope="workspace:um-mem",
         target_scope="workspace:rust-port",
         source_task_signature="repair:python",
         target_task_signature="repair:rust",
         qualified_memory_ids=("procedure-1",),
         verified_outcome_ids=("credit-a", "credit-b"),
-        independence_domains=("project:lethyx", "project:rust-port"),
+        independence_domains=("project:um-mem", "project:rust-port"),
         source_workflow="repair-python",
         target_workflow="repair-rust",
-        source_project_id="lethyx",
+        source_project_id="um-mem",
         target_project_id="rust-port",
         source_host="hermes",
         target_host="codex",
@@ -151,7 +151,7 @@ def test_procedure_reuse_requires_same_signature_or_qualified_transfer() -> None
         contraindications=("untrusted-origin",),
         exclusions=("production-erase",),
         support_count=2,
-        source_revision_id="lethyx@abc123",
+        source_revision_id="um-mem@abc123",
         valid_from="2026-01-01T00:00:00Z",
         expires_at="2027-01-01T00:00:00Z",
         drift_fingerprint="sha256:transfer-procedure-1",
@@ -170,7 +170,7 @@ def test_procedure_reuse_requires_same_signature_or_qualified_transfer() -> None
         replace(
             envelope,
             verified_outcome_ids=("credit-a",),
-            independence_domains=("project:lethyx",),
+            independence_domains=("project:um-mem",),
         )
 
 

@@ -3,7 +3,7 @@ from pathlib import Path
 
 import pytest
 
-from lethyx.integrations import mcp_settings
+from um_mem.integrations import mcp_settings
 
 
 def test_claude_mcp_install_is_user_scoped_and_preserves_other_settings(
@@ -26,16 +26,16 @@ def test_claude_mcp_install_is_user_scoped_and_preserves_other_settings(
     )
 
     config = json.loads(installed.read_text(encoding="utf-8"))
-    server = config["mcpServers"]["lethyx"]
+    server = config["mcpServers"]["um_mem"]
     assert config["otherSetting"] is True
     assert config["mcpServers"]["docs"] == {"command": "docs"}
-    assert server["args"] == ["-m", "lethyx.memory.mcp_server"]
+    assert server["args"] == ["-m", "um_mem.memory.mcp_server"]
     assert (
-        server["env"]["LETHYX_REPO_ROOT"].casefold()
+        server["env"]["UM_MEM_REPO_ROOT"].casefold()
         == str((tmp_path / "memory-store").resolve()).casefold()
     )
-    assert server["env"]["LETHYX_WORKSPACE"] == "workspace-a"
-    assert server["env"]["LETHYX_PROFILE"] == "profile-a"
+    assert server["env"]["UM_MEM_WORKSPACE"] == "workspace-a"
+    assert server["env"]["UM_MEM_PROFILE"] == "profile-a"
     status = mcp_settings.mcp_server_status(installed, host="claude")
     assert status["configured"] is True
     assert status["integration_mode"] == "mcp_tools_only"
@@ -63,11 +63,11 @@ def test_codex_mcp_install_preserves_toml_comments_and_uses_prompt_approval(
 
     text = installed.read_text(encoding="utf-8")
     config = tomlkit.parse(text)
-    server = config["mcp_servers"]["lethyx"]
+    server = config["mcp_servers"]["um_mem"]
     assert "# keep this comment" in text
     assert config["model"] == "test"
-    assert server["args"] == ["-m", "lethyx.memory.mcp_server"]
-    assert server["env"]["LETHYX_WORKSPACE"] == "workspace-b"
+    assert server["args"] == ["-m", "um_mem.memory.mcp_server"]
+    assert server["env"]["UM_MEM_WORKSPACE"] == "workspace-b"
     assert server["default_tools_approval_mode"] == "prompt"
     assert server["enabled"] is True
     assert mcp_settings.mcp_server_status(installed, host="codex")["configured"] is True
@@ -98,12 +98,12 @@ def test_hermes_mcp_install_preserves_yaml_comments_and_unrelated_settings(
     import yaml
 
     config = yaml.safe_load(text)
-    server = config["mcp_servers"]["lethyx"]
+    server = config["mcp_servers"]["um_mem"]
     assert "# keep this comment" in text
     assert config["model"] == {"provider": "test"}
     assert config["mcp_servers"]["docs"] == {"command": "docs"}
-    assert server["args"] == ["-m", "lethyx.memory.mcp_server"]
-    assert server["env"]["LETHYX_WORKSPACE"] == "workspace-c"
+    assert server["args"] == ["-m", "um_mem.memory.mcp_server"]
+    assert server["env"]["UM_MEM_WORKSPACE"] == "workspace-c"
     assert server["timeout"] == 120
     status = mcp_settings.hermes_mcp_server_status(installed)
     assert status["configured"] is True
@@ -118,7 +118,7 @@ def test_hermes_mcp_install_refuses_to_overwrite_unmanaged_entry(
 ) -> None:
     pytest.importorskip("ruamel.yaml")
     settings_path = tmp_path / "config.yaml"
-    settings_path.write_text("mcp_servers:\n  lethyx:\n    command: custom\n", encoding="utf-8")
+    settings_path.write_text("mcp_servers:\n  um_mem:\n    command: custom\n", encoding="utf-8")
     monkeypatch.setattr(mcp_settings, "_require_mcp_runtime", lambda: None)
     monkeypatch.setattr(mcp_settings, "_require_backend_runtime", lambda backend: None)
 
@@ -141,12 +141,12 @@ def test_mcp_install_refuses_to_overwrite_an_unmanaged_server_name(
     monkeypatch.setattr(mcp_settings, "_require_mcp_runtime", lambda: None)
     if host == "Claude Code":
         path = tmp_path / ".claude.json"
-        path.write_text(json.dumps({"mcpServers": {"lethyx": {"command": "custom"}}}))
+        path.write_text(json.dumps({"mcpServers": {"um_mem": {"command": "custom"}}}))
         install = mcp_settings.install_claude_mcp
     else:
         pytest.importorskip("tomlkit")
         path = tmp_path / "config.toml"
-        path.write_text("[mcp_servers.lethyx]\ncommand = 'custom'\n")
+        path.write_text("[mcp_servers.um_mem]\ncommand = 'custom'\n")
         install = mcp_settings.install_codex_mcp
 
     with pytest.raises(ValueError, match="unmanaged MCP server"):

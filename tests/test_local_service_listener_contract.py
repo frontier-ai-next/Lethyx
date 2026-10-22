@@ -13,13 +13,13 @@ from types import SimpleNamespace
 
 import pytest
 
-from lethyx.memory import local_service, mcp_call
-from lethyx.memory.local_service import (
+from um_mem.memory import local_service, mcp_call
+from um_mem.memory.local_service import (
     LocalServiceClientPool,
     build_local_service_identity,
     shutdown_local_service_listener,
 )
-from lethyx.memory.service_scheduler import HostStateEvent
+from um_mem.memory.service_scheduler import HostStateEvent
 
 
 @pytest.mark.skipif(os.name == "nt", reason="POSIX virtual-environment symlink contract")
@@ -51,6 +51,7 @@ def test_listener_launcher_retains_virtual_environment_dependencies(tmp_path: Pa
         capture_output=True,
         text=True,
         timeout=10,
+        check=False,
     )
 
     assert result.returncode == 0, result.stderr
@@ -551,7 +552,7 @@ def test_listener_reaps_after_bounded_idle_timeout(tmp_path: Path) -> None:
         caller_role="operator",
     )
     pool = LocalServiceClientPool(
-        environment={**os.environ, "LETHYX_LOCAL_SERVICE_IDLE_SECONDS": "1"}
+        environment={**os.environ, "UM_MEM_LOCAL_SERVICE_IDLE_SECONDS": "1"}
     )
     try:
         result = pool.call(identity, "health", {}, timeout_seconds=20)
@@ -674,7 +675,7 @@ def test_listener_reaps_when_its_explicit_owner_exits(tmp_path: Path) -> None:
         caller_role="operator",
     )
     pool = LocalServiceClientPool(
-        environment={**os.environ, "LETHYX_LOCAL_SERVICE_OWNER_PID": str(owner.pid)}
+        environment={**os.environ, "UM_MEM_LOCAL_SERVICE_OWNER_PID": str(owner.pid)}
     )
     try:
         result = pool.call(identity, "health", {}, timeout_seconds=20)

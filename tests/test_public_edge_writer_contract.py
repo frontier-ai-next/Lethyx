@@ -3,12 +3,11 @@ from typing import Any
 
 import pytest
 
-from lethyx.api import MemoryClient
-from lethyx.contracts import EvidenceRef
-from lethyx.memory import mcp_facade
-from lethyx.contracts import MemoryBlockRecord
-from lethyx.memory.backends.contracts import MemoryEdgeRecord
-from lethyx.memory.kernel.telemetry import read_memory_events
+from um_mem.api import MemoryClient
+from um_mem.contracts import EvidenceRef, MemoryBlockRecord
+from um_mem.memory import mcp_facade
+from um_mem.memory.backends.contracts import MemoryEdgeRecord
+from um_mem.memory.kernel.telemetry import read_memory_events
 
 
 class _EdgeBackend:
@@ -57,7 +56,7 @@ def test_mcp_add_edge_delegates_to_memory_client(monkeypatch) -> None:
     monkeypatch.setattr(mcp_facade, "_client", lambda **_kwargs: client)
     monkeypatch.setattr(mcp_facade, "_close_client", lambda _client: None)
 
-    payload = mcp_facade.lethyx_add_edge(
+    payload = mcp_facade.um_mem_add_edge(
         src_id="source-1",
         dst_id="target-1",
         edge_type="supports",

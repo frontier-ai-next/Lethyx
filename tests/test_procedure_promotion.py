@@ -2,8 +2,8 @@ from dataclasses import replace
 
 import pytest
 
-from lethyx import MemoryClient
-from lethyx.contracts import (
+from um_mem import MemoryClient
+from um_mem.contracts import (
     EvidenceRef,
     EvidenceResolver,
     MemoryDecisionEvent,
@@ -11,13 +11,13 @@ from lethyx.contracts import (
     OutcomeCreditEvent,
     build_workspace_context,
 )
-from lethyx.contracts.ledger import (
+from um_mem.contracts.ledger import (
     append_candidate_semantic_verification_ledger_event,
     append_memory_application_verification_ledger_event,
     append_verification_report_ledger_event,
 )
-from lethyx.memory.backends.sqlite_index import BackendSQLiteIndex
-from lethyx.memory.refinement import verified_procedure_promotion_gate
+from um_mem.memory.backends.sqlite_index import BackendSQLiteIndex
+from um_mem.memory.refinement import verified_procedure_promotion_gate
 
 
 def _observation(name: str) -> tuple[EvidenceRef, ...]:

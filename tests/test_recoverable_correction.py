@@ -3,16 +3,17 @@
 from dataclasses import replace
 
 import pytest
-import lethyx.api as api
-from lethyx.api import MemoryClient
-from lethyx.contracts import MemoryBlockRecord, VerificationReportRef
-from lethyx.contracts.ledger import append_candidate_semantic_verification_ledger_event
-from lethyx.memory.backends.sqlite_index import BackendSQLiteIndex
-from lethyx.memory.backends.contracts import EdgeType, MemoryEdgeRecord
-from lethyx.memory.kernel.models import block_record_to_event
-from lethyx.memory.kernel.writer import _write_memory_event
-from lethyx.memory.mutation import plan_memory_mutation, resolve_canonical_revision_head
 from test_memory_authority_and_isolation import _record
+
+from um_mem import api
+from um_mem.api import MemoryClient
+from um_mem.contracts import MemoryBlockRecord, VerificationReportRef
+from um_mem.contracts.ledger import append_candidate_semantic_verification_ledger_event
+from um_mem.memory.backends.contracts import EdgeType, MemoryEdgeRecord
+from um_mem.memory.backends.sqlite_index import BackendSQLiteIndex
+from um_mem.memory.kernel.models import block_record_to_event
+from um_mem.memory.kernel.writer import _write_memory_event
+from um_mem.memory.mutation import plan_memory_mutation, resolve_canonical_revision_head
 
 
 def review_report(client: MemoryClient, record: MemoryBlockRecord) -> VerificationReportRef:
@@ -102,7 +103,7 @@ def change_record(tmp_path, backend, record):
 
 
 def test_correction_publication_keeps_candidate_dependency(tmp_path):
-    client, backend, target, dependency, candidate = correction_setup(tmp_path)
+    client, backend, _target, dependency, candidate = correction_setup(tmp_path)
     try:
         backend.add_edge(
             MemoryEdgeRecord(
@@ -129,7 +130,7 @@ def test_correction_publication_keeps_candidate_dependency(tmp_path):
 
 
 def test_compensation_after_newer_proposal_keeps_that_proposal_but_restores_owned_target(tmp_path):
-    client, backend, target, dependency, candidate = correction_setup(tmp_path)
+    client, backend, target, _dependency, candidate = correction_setup(tmp_path)
     try:
         published = publish(client, tmp_path, candidate)
         amended = client.correction(
@@ -155,7 +156,7 @@ def test_compensation_after_newer_proposal_keeps_that_proposal_but_restores_owne
 
 
 def test_target_compensation_cas_does_not_touch_interleaved_newer_target(tmp_path, monkeypatch):
-    client, backend, target, dependency, candidate = correction_setup(tmp_path)
+    client, backend, target, _dependency, candidate = correction_setup(tmp_path)
     try:
         published = publish(client, tmp_path, candidate)
         original_write = api._write_memory_event
@@ -221,7 +222,7 @@ def test_restore_keeps_prior_invalid_dependency(tmp_path):
 def test_correction_publication_rejects_source_amended_between_planning_and_commit(
     tmp_path, monkeypatch
 ):
-    client, backend, target, dependency, candidate = correction_setup(tmp_path)
+    client, backend, target, _dependency, candidate = correction_setup(tmp_path)
     try:
         original_write = api._write_memory_event
         observed = {}

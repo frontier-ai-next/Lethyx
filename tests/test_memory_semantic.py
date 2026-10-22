@@ -8,9 +8,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from lethyx.memory import local_tier
-from lethyx.memory import mcp_server
-from lethyx.memory import semantic
+from um_mem.memory import local_tier, mcp_server, semantic
 
 _FAMILIES = {
     "config": ("config", "конфигурац", "конфиг"),
@@ -45,7 +43,7 @@ class FakeEmbedder:
 @pytest.fixture
 def fake_embedder(monkeypatch) -> FakeEmbedder:
     embedder = FakeEmbedder()
-    monkeypatch.setenv("LETHYX_SEMANTIC", "1")
+    monkeypatch.setenv("UM_MEM_SEMANTIC", "1")
     monkeypatch.setattr(semantic, "get_embedder", lambda *args, **kwargs: embedder)
     return embedder
 
@@ -77,9 +75,9 @@ def test_query_uses_non_ascii_script_detects_other_scripts() -> None:
 def test_effective_floor_keeps_the_base_floor_for_other_scripts() -> None:
     base = semantic.relevance_floor("fake/multilingual-v1")
     assert semantic.effective_floor("fake/multilingual-v1", cross_script=True) == base
-    assert semantic.effective_floor(
-        "fake/multilingual-v1", cross_script=False
-    ) == pytest.approx(base + semantic.LATIN_SCRIPT_MARGIN)
+    assert semantic.effective_floor("fake/multilingual-v1", cross_script=False) == pytest.approx(
+        base + semantic.LATIN_SCRIPT_MARGIN
+    )
 
 
 def test_rank_semantic_caches_vectors_between_calls(
@@ -88,9 +86,7 @@ def test_rank_semantic_caches_vectors_between_calls(
     index = semantic.SemanticIndex(tmp_path / "embeddings.sqlite")
     records = _records()
 
-    first = semantic.rank_semantic(
-        "где конфигурация", records, embedder=fake_embedder, index=index
-    )
+    first = semantic.rank_semantic("где конфигурация", records, embedder=fake_embedder, index=index)
     assert first
     assert first[0][0] == "mem_config"
     assert first[0][1] > 0.9
@@ -100,9 +96,7 @@ def test_rank_semantic_caches_vectors_between_calls(
     second = semantic.rank_semantic(
         "где конфигурация", records, embedder=fake_embedder, index=index
     )
-    assert [record_id for record_id, _ in second] == [
-        record_id for record_id, _ in first
-    ]
+    assert [record_id for record_id, _ in second] == [record_id for record_id, _ in first]
     assert second[0][1] == pytest.approx(first[0][1], abs=1e-6)
     # Only the query is embedded once every record vector is cached.
     assert len(fake_embedder.calls) == 3
@@ -113,17 +107,13 @@ def test_rank_semantic_reembeds_after_the_content_changed(
 ) -> None:
     index = semantic.SemanticIndex(tmp_path / "embeddings.sqlite")
     records = _records()
-    semantic.rank_semantic(
-        "где конфигурация", records, embedder=fake_embedder, index=index
-    )
+    semantic.rank_semantic("где конфигурация", records, embedder=fake_embedder, index=index)
     calls_before = len(fake_embedder.calls)
     changed = [
         records[0],
         dict(records[1], title="Config tooling", content="Config tooling uses uv."),
     ]
-    ranked = semantic.rank_semantic(
-        "питон", changed, embedder=fake_embedder, index=index
-    )
+    ranked = semantic.rank_semantic("питон", changed, embedder=fake_embedder, index=index)
     # The changed record no longer belongs to the python family, so the stale
     # vector must not be reused: the record is re-embedded from its new text.
     assert ranked == []
@@ -159,11 +149,13 @@ def test_recall_fallback_answers_a_cross_script_question(
     monkeypatch.setattr(
         mcp_server,
         "_service_call",
-        lambda *args, **kwargs: {"ok": True, "records": _records()},
+        lambda *args, **kwargs: {
+            "ok": True,
+            "records": _records(),
+            "hits": [{"source": r["record_id"]} for r in _records()],
+        },
     )
-    identity = SimpleNamespace(
-        repo_root=tmp_path, workspace_id="opencode", profile_id="default"
-    )
+    identity = SimpleNamespace(repo_root=tmp_path, workspace_id="opencode", profile_id="default")
     result = mcp_server._apply_recall_fallback(
         identity,
         object(),
@@ -185,11 +177,13 @@ def test_recall_fallback_stays_empty_for_an_off_topic_question(
     monkeypatch.setattr(
         mcp_server,
         "_service_call",
-        lambda *args, **kwargs: {"ok": True, "records": _records()},
+        lambda *args, **kwargs: {
+            "ok": True,
+            "records": _records(),
+            "hits": [{"source": r["record_id"]} for r in _records()],
+        },
     )
-    identity = SimpleNamespace(
-        repo_root=tmp_path, workspace_id="opencode", profile_id="default"
-    )
+    identity = SimpleNamespace(repo_root=tmp_path, workspace_id="opencode", profile_id="default")
     result = mcp_server._apply_recall_fallback(
         identity,
         object(),
@@ -208,11 +202,13 @@ def test_recall_fallback_keeps_lexical_hits_for_same_script_questions(
     monkeypatch.setattr(
         mcp_server,
         "_service_call",
-        lambda *args, **kwargs: {"ok": True, "records": _records()},
+        lambda *args, **kwargs: {
+            "ok": True,
+            "records": _records(),
+            "hits": [{"source": r["record_id"]} for r in _records()],
+        },
     )
-    identity = SimpleNamespace(
-        repo_root=tmp_path, workspace_id="opencode", profile_id="default"
-    )
+    identity = SimpleNamespace(repo_root=tmp_path, workspace_id="opencode", profile_id="default")
     result = mcp_server._apply_recall_fallback(
         identity,
         object(),
@@ -246,7 +242,9 @@ def test_local_tier_marks_the_result_and_answers_across_scripts(
     assert result["hits"][0]["title"] == "OpenCode config locations"
 
 
-def test_local_tier_declines_scoped_queries(fake_embedder: FakeEmbedder, tmp_path: Path) -> None:
+def test_local_tier_answers_scoped_queries_inside_the_leaf(
+    fake_embedder: FakeEmbedder, tmp_path: Path
+) -> None:
     result = local_tier.apply_local_tier(
         {"ok": True, "hits": []},
         name="recall",
@@ -262,8 +260,62 @@ def test_local_tier_declines_scoped_queries(fake_embedder: FakeEmbedder, tmp_pat
         workspace_id="opencode",
     )
     assert result["_local_tier_applied"] is True
+    assert result["fallback"] == "semantic"
+    assert [hit["title"] for hit in result["hits"]] == ["OpenCode config locations"]
+    assert [hit["metadata"]["logical_block_id"] for hit in result["hits"]] == ["leaf_config"]
+
+
+def test_local_tier_declines_exact_record_id_queries(
+    fake_embedder: FakeEmbedder, tmp_path: Path
+) -> None:
+    result = local_tier.apply_local_tier(
+        {"ok": True, "hits": []},
+        name="recall",
+        arguments={
+            "query": "где конфигурация",
+            "limit": 4,
+            "include_candidates": True,
+            "source_horizon": "durable",
+            "record_ids": ["mem_config"],
+        },
+        records_provider=lambda: _records(),
+        repo_root=tmp_path,
+        workspace_id="opencode",
+    )
+    assert result["_local_tier_applied"] is True
     assert not result.get("hits")
     assert "fallback" not in result
+
+
+def test_local_tier_labels_the_score_scale(fake_embedder: FakeEmbedder, tmp_path: Path) -> None:
+    semantic_result = local_tier.apply_local_tier(
+        {"ok": True, "hits": []},
+        name="recall",
+        arguments={
+            "query": "где конфигурация",
+            "limit": 4,
+            "include_candidates": True,
+            "source_horizon": "durable",
+        },
+        records_provider=lambda: _records(),
+        repo_root=tmp_path,
+        workspace_id="opencode",
+    )
+    lexical_result = local_tier.apply_local_tier(
+        {"ok": True, "hits": []},
+        name="recall",
+        arguments={
+            "query": "OpenCode config locations",
+            "limit": 4,
+            "include_candidates": True,
+            "source_horizon": "durable",
+        },
+        records_provider=lambda: _records(),
+        repo_root=tmp_path,
+        workspace_id="opencode",
+    )
+    assert semantic_result["hits"][0]["score_mode"] == "semantic_cosine"
+    assert lexical_result["hits"][0]["score_mode"] == "relative_lexical_ngram"
 
 
 def test_global_ranking_reaches_a_record_outside_the_window(
@@ -347,14 +399,14 @@ def test_global_ranking_can_be_narrowed_to_one_kind(
 
 
 def test_procedure_entry_reports_its_freshness() -> None:
-    from lethyx.memory import procedures as procedure_rules
+    from um_mem.memory import procedures as procedure_rules
 
     record = {
         "record_id": "mem_procedure",
         "title": "Restart the local service",
         "content": "Restart the MCP service after editing the source.",
         "kind": "procedure",
-        "tags": ["lethyx"],
+        "tags": ["um-mem"],
         "recorded_at": "2026-10-01T00:00:00Z",
         "metadata": {
             "steps": ["edit the source", "restart the service"],
@@ -374,7 +426,7 @@ def test_procedure_entry_reports_its_freshness() -> None:
 
 
 def test_procedure_staleness_is_caused_by_the_environment() -> None:
-    from lethyx.memory import procedures as procedure_rules
+    from um_mem.memory import procedures as procedure_rules
 
     descriptor = procedure_rules.current_descriptor(
         repo_root="/tmp/store", model="model-a", workspace_id="ws"
@@ -430,9 +482,7 @@ def test_calibration_measures_a_floor_between_relevant_and_irrelevant(
     assert semantic.calibrated_floor(tmp_path, "opencode", "other/model") is None
 
 
-def test_vector_cache_reuses_the_parsed_index(
-    fake_embedder: FakeEmbedder, tmp_path: Path
-) -> None:
+def test_vector_cache_reuses_the_parsed_index(fake_embedder: FakeEmbedder, tmp_path: Path) -> None:
     index = semantic.SemanticIndex(tmp_path / "embeddings.sqlite")
     semantic.embed_record(
         index,

@@ -4,9 +4,10 @@ from pathlib import Path
 from typing import Any
 
 import pytest
-import lethyx.memory.cli as memory_cli
-from lethyx.memory.cli import main
-from lethyx.integrations import mcp_settings, hermes_provider
+
+import um_mem.memory.cli as memory_cli
+from um_mem.integrations import hermes_provider, mcp_settings
+from um_mem.memory.cli import main
 
 
 def test_hermes_provider_install_writes_thin_wrapper(tmp_path: Path, capsys) -> None:
@@ -25,13 +26,13 @@ def test_hermes_provider_install_writes_thin_wrapper(tmp_path: Path, capsys) -> 
 
     assert rc == 0
     payload = json.loads(capsys.readouterr().out)
-    wrapper = tmp_path / "plugins" / "lethyx" / "__init__.py"
+    wrapper = tmp_path / "plugins" / "um_mem" / "__init__.py"
     assert payload["ok"] is True
     assert payload["provider_path"] == str(wrapper)
     assert payload["staged"] is True
     assert payload["active"] is False
     assert payload["live_callback_proven"] is False
-    assert "lethyx.integrations.hermes_provider" in wrapper.read_text(encoding="utf-8")
+    assert "um_mem.integrations.hermes_provider" in wrapper.read_text(encoding="utf-8")
 
 
 def test_hermes_provider_status_reports_install_state(tmp_path: Path, capsys) -> None:
@@ -73,7 +74,7 @@ def test_hermes_provider_install_defaults_to_hermes_home_env(
 
     assert rc == 0
     payload = json.loads(capsys.readouterr().out)
-    assert payload["provider_path"] == str(tmp_path / "plugins" / "lethyx" / "__init__.py")
+    assert payload["provider_path"] == str(tmp_path / "plugins" / "um_mem" / "__init__.py")
 
 
 def test_hermes_mcp_install_and_status_use_profile_config(
@@ -114,7 +115,7 @@ def test_hermes_mcp_install_and_status_use_profile_config(
     assert status["identity"]["profile"] == "profile-h"
 
 
-def test_native_hermes_install_refuses_python_below_lethyx_minimum(
+def test_native_hermes_install_refuses_python_below_um_mem_minimum(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

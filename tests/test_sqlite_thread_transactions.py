@@ -4,7 +4,7 @@ from threading import Event
 import pytest
 from test_native_candidate_sidecar_recall import _record
 
-from lethyx.memory.backends.sqlite_index import BackendSQLiteIndex
+from um_mem.memory.backends.sqlite_index import BackendSQLiteIndex
 
 
 def test_failed_append_does_not_abort_another_thread_append(tmp_path, monkeypatch):

@@ -2,10 +2,10 @@ from dataclasses import replace
 
 import pytest
 
-from lethyx import MemoryClient
-from lethyx.contracts import EvidenceRef, MemoryDecisionEvent, MemoryUsageEvent, OutcomeCreditEvent
-from lethyx.memory.backends.contracts import MemoryUsageRecord
-from lethyx.memory.refinement import (
+from um_mem import MemoryClient
+from um_mem.contracts import EvidenceRef, MemoryDecisionEvent, MemoryUsageEvent, OutcomeCreditEvent
+from um_mem.memory.backends.contracts import MemoryUsageRecord
+from um_mem.memory.refinement import (
     evaluate_advisory_association,
     procedure_promotion_gate,
     qualify_procedure_reuse,
@@ -76,7 +76,7 @@ def _credit(memory_id: str, outcome: str, domain: str) -> OutcomeCreditEvent:
         approval_principal_id="",
         task_family="repair",
         stage="verification",
-        project_id="lethyx",
+        project_id="um-mem",
         host_id="codex",
         profile_id="release",
         independence_domain=domain,
@@ -174,7 +174,7 @@ def test_exit_uncertain_attribution_stays_neutral() -> None:
         approval_principal_id="",
         task_family="repair",
         stage="verification",
-        project_id="lethyx",
+        project_id="um-mem",
         host_id="codex",
         profile_id="release",
         independence_domain="run-neutral",
@@ -204,7 +204,7 @@ def test_exit_context_local_utility_does_not_transfer_without_envelope(tmp_path)
             memory_id="memory-help",
             task_family="repair",
             stage="verification",
-            project_id="lethyx",
+            project_id="um-mem",
             host_id="codex",
             profile_id="release",
             minimum_support=1,

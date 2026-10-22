@@ -1,7 +1,7 @@
-from lethyx.memory.blocks.catalog import BlockDescriptor, compile_semantic_catalog
-from lethyx.memory.blocks.models import MemoryBlock
-from lethyx.memory.query_analysis import EvidenceRequirement
-from lethyx.memory.recall_plan import RecallPlan
+from um_mem.memory.blocks.catalog import BlockDescriptor, compile_semantic_catalog
+from um_mem.memory.blocks.models import MemoryBlock
+from um_mem.memory.query_analysis import EvidenceRequirement
+from um_mem.memory.recall_plan import RecallPlan
 
 
 def _catalog_block() -> MemoryBlock:
@@ -39,15 +39,15 @@ def test_active_catalog_exposes_one_descriptor_contract_without_routing_projecti
 
 def test_recall_plan_accepts_only_caller_typed_structural_hints() -> None:
     plan = RecallPlan.compile(
-        "Inspect src/lethyx/api.py and RecallPlan.compile for Acme Corp",
+        "Inspect src/um_mem/api.py and RecallPlan.compile for Acme Corp",
         workspace_id="alpha",
         logical_block_ids=("code_resources",),
-        paths=("src/lethyx/api.py",),
+        paths=("src/um_mem/api.py",),
         symbols=("RecallPlan.compile",),
     )
 
     assert plan.logical_block_ids == ("code_resources",)
-    assert plan.paths == ("src/lethyx/api.py",)
+    assert plan.paths == ("src/um_mem/api.py",)
     assert plan.symbols == ("RecallPlan.compile",)
     assert plan.entities == ()
     assert plan.evidence_roles == ()

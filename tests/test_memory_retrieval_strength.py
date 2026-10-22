@@ -1,35 +1,35 @@
 from pathlib import Path
 
-from lethyx.memory.backends.base import MemoryHit
-from lethyx.contracts import EvidenceRef, MemoryBlockRecord, RecordBlockMembership
-from lethyx.memory.backends.contracts import block_record_to_memory_hit
-from lethyx.memory.backends.sqlite_index import BackendSQLiteIndex
+from um_mem.contracts import EvidenceRef, MemoryBlockRecord, RecordBlockMembership
+from um_mem.memory.backends.base import MemoryHit
+from um_mem.memory.backends.contracts import block_record_to_memory_hit
+from um_mem.memory.backends.sqlite_index import BackendSQLiteIndex
 
 
 def _block(block_id: str, content: str, **overrides) -> MemoryBlockRecord:
-    data = dict(
-        block_id=block_id,
-        revision_id=f"rev_{block_id}",
-        title=block_id,
-        content=content,
-        block_membership=RecordBlockMembership(
+    data = {
+        "block_id": block_id,
+        "revision_id": f"rev_{block_id}",
+        "title": block_id,
+        "content": content,
+        "block_membership": RecordBlockMembership(
             primary_block_id="workspace_episodes",
             catalog_revision_id="test-catalog",
         ),
-        kind="observation",
-        status="accepted",
-        retention="durable",
-        delivery_policy="on_demand",
-        temperature="warm",
-        authority="advisory",
-        trust_level="workspace_verified",
-        scope="workspace",
-        workspace_id="ws",
-        source_backend="test",
-        verification_status="verified",
-        verification_methods=("test_run",),
-        promotion_decision="accepted",
-        evidence_refs=(
+        "kind": "observation",
+        "status": "accepted",
+        "retention": "durable",
+        "delivery_policy": "on_demand",
+        "temperature": "warm",
+        "authority": "advisory",
+        "trust_level": "workspace_verified",
+        "scope": "workspace",
+        "workspace_id": "ws",
+        "source_backend": "test",
+        "verification_status": "verified",
+        "verification_methods": ("test_run",),
+        "promotion_decision": "accepted",
+        "evidence_refs": (
             EvidenceRef(
                 ref_type="test_run",
                 ref_id=f"retrieval-strength:{block_id}",
@@ -37,7 +37,7 @@ def _block(block_id: str, content: str, **overrides) -> MemoryBlockRecord:
                 producer_id="retrieval-strength-test",
             ),
         ),
-    )
+    }
     data.update(overrides)
     return MemoryBlockRecord(**data)
 

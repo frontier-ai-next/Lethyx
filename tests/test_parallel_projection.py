@@ -1,5 +1,5 @@
-import json
 import hashlib
+import json
 import multiprocessing
 import os
 import sqlite3
@@ -12,14 +12,14 @@ from types import SimpleNamespace
 
 import pytest
 
-from lethyx import MemoryClient
-from lethyx.contracts import RecordBlockMembership
-from lethyx.memory.backends.contracts import CanonicalHeadConflict
-from lethyx.memory.backends.mempalace import MemPalaceBackend, _NativeMemPalace
-from lethyx.memory.backends.mnemosyne import MnemosyneBackend
-from lethyx.memory.backends.sqlite_index import BackendSQLiteIndex
-from lethyx.memory.blocks.catalog import block_descriptor_node_id
-from lethyx.memory.kernel.telemetry import read_memory_events
+from um_mem import MemoryClient
+from um_mem.contracts import RecordBlockMembership
+from um_mem.memory.backends.contracts import CanonicalHeadConflict
+from um_mem.memory.backends.mempalace import MemPalaceBackend, _NativeMemPalace
+from um_mem.memory.backends.mnemosyne import MnemosyneBackend
+from um_mem.memory.backends.sqlite_index import BackendSQLiteIndex
+from um_mem.memory.blocks.catalog import block_descriptor_node_id
+from um_mem.memory.kernel.telemetry import read_memory_events
 
 
 def test_mempalace_embeddings_overlap_outside_native_commit_gate(tmp_path, monkeypatch):
@@ -51,7 +51,7 @@ def test_mempalace_embeddings_overlap_outside_native_commit_gate(tmp_path, monke
             finally:
                 commit_lock.release()
 
-    monkeypatch.setattr("lethyx.memory.backends.mempalace.get_embedding_function", lambda: embed)
+    monkeypatch.setattr("um_mem.memory.backends.mempalace.get_embedding_function", lambda: embed)
     monkeypatch.setattr(native, "collection", lambda *args, **kwargs: Collection())
     try:
         with ThreadPoolExecutor(max_workers=2) as executor:
@@ -775,7 +775,7 @@ def test_recovery_does_not_interfere_with_live_canonical_writer(
 
 
 def test_mempalace_snapshot_excludes_commit_after_read_boundary(tmp_path, monkeypatch):
-    from lethyx.memory.backends import mempalace
+    from um_mem.memory.backends import mempalace
 
     backend = MemPalaceBackend(tmp_path / "source", workspace_id="ws")
     client = MemoryClient(tmp_path / "source", workspace_id="ws", backend_instance=backend)
@@ -814,8 +814,8 @@ def test_mempalace_snapshot_excludes_commit_after_read_boundary(tmp_path, monkey
 def test_reconcile_does_not_project_a_new_uncommitted_writer(tmp_path, monkeypatch, backend_name):
     from test_real_backend_requirements import _RecoveryHindsightClient
 
-    from lethyx.memory.backends.hindsight import HindsightBackend
-    from lethyx.memory.hindsight.config import HindsightConfig
+    from um_mem.memory.backends.hindsight import HindsightBackend
+    from um_mem.memory.hindsight.config import HindsightConfig
 
     if backend_name == "hindsight":
         backend = HindsightBackend(
@@ -903,7 +903,7 @@ def test_duplicate_operation_concurrently_returns_original_receipt(
         for result in results
     ]
     assert all(receipt == receipts[0] for receipt in receipts)
-    receipt_bytes = (tmp_path / ".Lethyx/memory/service_receipts.sqlite").read_bytes()
+    receipt_bytes = (tmp_path / ".UM-MEM/memory/service_receipts.sqlite").read_bytes()
     assert b"identical source" not in receipt_bytes
     assert b"same-operation" not in receipt_bytes
     reopened = BackendSQLiteIndex(path, backend_id="test", workspace_id="ws")

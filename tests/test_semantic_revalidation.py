@@ -2,16 +2,16 @@ from dataclasses import replace
 
 import pytest
 
-from lethyx import MemoryClient
-from lethyx.contracts import (
+from um_mem import MemoryClient
+from um_mem.contracts import (
     EvidenceRef,
     OriginRef,
     ProspectiveLifecycleEvent,
     ProspectiveObligation,
     ProspectiveTriggerPredicate,
 )
-from lethyx.memory.backends.contracts import CanonicalHeadConflict
-from lethyx.memory.prospective import (
+from um_mem.memory.backends.contracts import CanonicalHeadConflict
+from um_mem.memory.prospective import (
     ProspectiveTriggerContext,
     evaluate_prospective_trigger,
 )

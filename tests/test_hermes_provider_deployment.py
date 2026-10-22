@@ -5,7 +5,7 @@ from pathlib import Path
 
 import pytest
 
-from lethyx.integrations import hermes_provider
+from um_mem.integrations import hermes_provider
 
 
 def test_hermes_preserves_the_canonical_umbrella_workspace_id() -> None:
@@ -28,11 +28,11 @@ import json
 import sys
 
 sys.path.insert(0, sys.argv[1])
-import lethyx.integrations.hermes_provider
+import um_mem.integrations.hermes_provider
 
 print(json.dumps({
-    "api_loaded": "lethyx.api" in sys.modules,
-    "mempalace_loaded": "lethyx.memory.backends.mempalace" in sys.modules,
+    "api_loaded": "um_mem.api" in sys.modules,
+    "mempalace_loaded": "um_mem.memory.backends.mempalace" in sys.modules,
 }))
 """
 
@@ -62,16 +62,16 @@ sys.path.insert(0, sys.argv[1])
 
 class BlockMemPalaceImport(MetaPathFinder):
     def find_spec(self, fullname, path=None, target=None):
-        if fullname == "lethyx.memory.backends.mempalace":
+        if fullname == "um_mem.memory.backends.mempalace":
             raise ModuleNotFoundError("simulated optional MemPalace dependency", name=fullname)
         return None
 
 
 sys.meta_path.insert(0, BlockMemPalaceImport())
-import lethyx.memory.kernel.writer
+import um_mem.memory.kernel.writer
 
 print(json.dumps({
-    "mempalace_loaded": "lethyx.memory.backends.mempalace" in sys.modules,
+    "mempalace_loaded": "um_mem.memory.backends.mempalace" in sys.modules,
 }))
 """
 
@@ -87,7 +87,7 @@ print(json.dumps({
 
 
 def test_install_replaces_stale_monolith_atomically_and_smoke_loads(tmp_path: Path) -> None:
-    target = tmp_path / "plugins" / "lethyx" / "__init__.py"
+    target = tmp_path / "plugins" / "um_mem" / "__init__.py"
     target.parent.mkdir(parents=True)
     target.write_text("class UmMemMemoryProvider:\n    stale = True\n", encoding="utf-8")
 
@@ -97,15 +97,15 @@ def test_install_replaces_stale_monolith_atomically_and_smoke_loads(tmp_path: Pa
     assert installed == target
     text = target.read_text(encoding="utf-8")
     assert "stale = True" not in text
-    assert "lethyx.integrations.hermes_provider" in text
+    assert "um_mem.integrations.hermes_provider" in text
     assert smoke["ok"] is True
-    assert smoke["provider_module"] == "lethyx.integrations.hermes_provider"
+    assert smoke["provider_module"] == "um_mem.integrations.hermes_provider"
     assert smoke["block_first_supported"] is True
     assert not list(target.parent.glob("*.tmp"))
 
 
 def test_install_rolls_back_previous_plugin_when_smoke_fails(monkeypatch, tmp_path: Path) -> None:
-    target = tmp_path / "plugins" / "lethyx" / "__init__.py"
+    target = tmp_path / "plugins" / "um_mem" / "__init__.py"
     target.parent.mkdir(parents=True)
     original = "# previous working plugin\n"
     target.write_text(original, encoding="utf-8")
@@ -125,14 +125,14 @@ def test_install_rolls_back_previous_plugin_when_smoke_fails(monkeypatch, tmp_pa
 def test_thin_wrapper_bootstraps_configured_source_when_package_is_not_installed(
     tmp_path: Path,
 ) -> None:
-    from lethyx.memory import mcp_facade
+    from um_mem.memory import mcp_facade
 
     project_root = Path(__file__).resolve().parents[1]
-    config = tmp_path / "lethyx" / "config.json"
+    config = tmp_path / "um_mem" / "config.json"
     config.parent.mkdir(parents=True)
     config.write_text(json.dumps({"code_root": str(project_root)}), encoding="utf-8")
     installed = hermes_provider.install_hermes_plugin(tmp_path, overwrite=True)
-    assert sys.modules["lethyx.memory.mcp_facade"] is mcp_facade
+    assert sys.modules["um_mem.memory.mcp_facade"] is mcp_facade
     script = """
 import importlib.util
 import json
@@ -147,20 +147,20 @@ sys.path[:] = [entry for entry in sys.path if Path(entry).resolve() != source_ro
 
 class BlockUmMemUntilSourceBootstrap(MetaPathFinder):
     def find_spec(self, fullname, path=None, target=None):
-        if (fullname == "lethyx" or fullname.startswith("lethyx.")) and str(source_root) not in sys.path:
-            raise ModuleNotFoundError("simulated missing Lethyx package", name=fullname)
+        if (fullname == "um_mem" or fullname.startswith("um_mem.")) and str(source_root) not in sys.path:
+            raise ModuleNotFoundError("simulated missing UM-MEM package", name=fullname)
         return None
 
 
 sys.meta_path.insert(0, BlockUmMemUntilSourceBootstrap())
 try:
-    importlib.util.find_spec("lethyx")
+    importlib.util.find_spec("um_mem")
 except ModuleNotFoundError:
     package_was_missing = True
 else:
     package_was_missing = False
 spec = importlib.util.spec_from_file_location(
-    "_hermes_user_plugins.lethyx",
+    "_hermes_user_plugins.um_mem",
     plugin,
     submodule_search_locations=[str(plugin.parent)],
 )
@@ -191,7 +191,7 @@ print(json.dumps({
     payload = json.loads(completed.stdout)
     assert payload == {
         "package_was_missing": True,
-        "provider_module": "lethyx.integrations.hermes_provider",
+        "provider_module": "um_mem.integrations.hermes_provider",
         "wrapper_version": 4,
     }
 
@@ -200,9 +200,9 @@ def test_thin_wrapper_prefers_configured_source_over_cached_installed_package(
     tmp_path: Path,
 ) -> None:
     installed = hermes_provider.install_hermes_plugin(tmp_path, overwrite=True)
-    config = tmp_path / "lethyx" / "config.json"
+    config = tmp_path / "um_mem" / "config.json"
     configured_root = tmp_path / "configured-source"
-    configured_provider = configured_root / "src" / "lethyx" / "integrations" / "hermes_provider.py"
+    configured_provider = configured_root / "src" / "um_mem" / "integrations" / "hermes_provider.py"
     configured_provider.parent.mkdir(parents=True)
     configured_provider.parents[1].joinpath("__init__.py").write_text("", encoding="utf-8")
     configured_provider.parent.joinpath("__init__.py").write_text("", encoding="utf-8")
@@ -225,7 +225,7 @@ def register(_ctx):
     config.write_text(json.dumps({"code_root": str(configured_root)}), encoding="utf-8")
 
     installed_root = tmp_path / "fake-installed"
-    installed_provider = installed_root / "lethyx" / "integrations" / "hermes_provider.py"
+    installed_provider = installed_root / "um_mem" / "integrations" / "hermes_provider.py"
     installed_provider.parent.mkdir(parents=True)
     installed_provider.parents[1].joinpath("__init__.py").write_text("", encoding="utf-8")
     installed_provider.parent.joinpath("__init__.py").write_text("", encoding="utf-8")
@@ -254,16 +254,16 @@ plugin = Path(sys.argv[1])
 installed_root = Path(sys.argv[2]).resolve()
 configured_src = Path(sys.argv[3]).resolve()
 sys.path.insert(0, str(installed_root))
-import lethyx.integrations.hermes_provider as stale
+import um_mem.integrations.hermes_provider as stale
 
 spec = importlib.util.spec_from_file_location(
-    "_hermes_user_plugins.lethyx",
+    "_hermes_user_plugins.um_mem",
     plugin,
     submodule_search_locations=[str(plugin.parent)],
 )
 module = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(module)
-loaded = sys.modules["lethyx.integrations.hermes_provider"]
+loaded = sys.modules["um_mem.integrations.hermes_provider"]
 print(json.dumps({
     "preloaded_marker": stale.UmMemMemoryProvider.MARKER,
     "provider_marker": module.UmMemMemoryProvider.MARKER,

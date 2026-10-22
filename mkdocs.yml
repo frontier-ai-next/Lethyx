@@ -1,8 +1,8 @@
-site_name: Lethyx
+site_name: UM-MEM
 site_description: Evolving block memory for long-running agents
-repo_name: frontier-ai-next/Lethyx
-repo_url: https://github.com/frontier-ai-next/Lethyx
-docs_dir: docs/lethyx
+repo_name: frontier-ai-next/UM-MEM
+repo_url: https://github.com/frontier-ai-next/UM-MEM
+docs_dir: docs/um-mem
 site_dir: site
 use_directory_urls: true
 

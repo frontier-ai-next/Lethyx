@@ -2,15 +2,15 @@ from dataclasses import replace
 from pathlib import Path
 
 import pytest
-
-from lethyx.memory.backends.query_policy import merge_hybrid_block_results
-from lethyx.memory.backends.mempalace import MemPalaceBackend, _record_partition_identity
-from lethyx.memory.recall_plan import RecallPlan
 from test_native_candidate_sidecar_recall import (
     _mempalace_backend,
     _record,
     _retain_projected_sidecar,
 )
+
+from um_mem.memory.backends.mempalace import MemPalaceBackend, _record_partition_identity
+from um_mem.memory.backends.query_policy import merge_hybrid_block_results
+from um_mem.memory.recall_plan import RecallPlan
 
 
 def test_retrieval_mode_round_trip_and_closed_boundary() -> None:

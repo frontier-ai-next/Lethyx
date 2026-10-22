@@ -1,31 +1,30 @@
-from dataclasses import replace
-from datetime import datetime, timedelta, timezone
 import json
+from dataclasses import replace
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
 
 import pytest
 
-from lethyx import MemoryClient
-from lethyx.contracts import EvidenceRef, MemoryBlockRecord, RecordBlockMembership
-from lethyx.memory.backends.hindsight import HindsightBackend
-from lethyx.memory.backends.mempalace import MemPalaceBackend
-from lethyx.memory.backends.mnemosyne import MnemosyneBackend
-from lethyx.memory.backends.query_policy import NATIVE_PROJECTION_REBUILD_REQUIRED
-from lethyx.memory.backends.base import ReconcileReport
-from lethyx.memory.backends.contracts import (
+from um_mem import MemoryClient, api
+from um_mem.contracts import EvidenceRef, MemoryBlockRecord, RecordBlockMembership
+from um_mem.memory import cli
+from um_mem.memory.backends.base import ReconcileReport
+from um_mem.memory.backends.contracts import (
     block_from_json,
     block_record_to_memory_hit,
     block_to_json,
     memory_event_to_block_record,
 )
-from lethyx.memory.hindsight.config import HindsightConfig
-from lethyx.memory import cli
-from lethyx.memory.kernel.models import block_record_to_event, normalize_memory_event
-from lethyx.memory.mutation import plan_lifecycle_mutation, plan_memory_mutation
-from lethyx.memory.recall_plan import RecallPlan
-from lethyx import api
-from lethyx.memory.mcp_facade import _dedup_records
+from um_mem.memory.backends.hindsight import HindsightBackend
+from um_mem.memory.backends.mempalace import MemPalaceBackend
+from um_mem.memory.backends.mnemosyne import MnemosyneBackend
+from um_mem.memory.backends.query_policy import NATIVE_PROJECTION_REBUILD_REQUIRED
+from um_mem.memory.hindsight.config import HindsightConfig
+from um_mem.memory.kernel.models import block_record_to_event, normalize_memory_event
+from um_mem.memory.mcp_facade import _dedup_records
+from um_mem.memory.mutation import plan_lifecycle_mutation, plan_memory_mutation
+from um_mem.memory.recall_plan import RecallPlan
 
 
 def test_recall_keeps_independent_and_opposing_records() -> None:
@@ -149,7 +148,7 @@ class _StaleMnemosyne:
         self._row = {
             "id": record.block_id,
             "content": MnemosyneBackend._native_expected_content(record, commit_revision),
-            "source": f"lethyx:{record.workspace_id}:{record.block_id}",
+            "source": f"um-mem:{record.workspace_id}:{record.block_id}",
             "metadata": _canonical_native_metadata(
                 record,
                 commit_revision=str(commit_revision),
@@ -257,7 +256,7 @@ def test_t12_cap_scope_ttl_preserve_current_records(
         _stage_committed(backend, root, backend_name)
         expired_decoy = _record(
             "expired-decoy",
-            expires_at=(datetime.now(timezone.utc) - timedelta(minutes=1)).isoformat(),
+            expires_at=(datetime.now(UTC) - timedelta(minutes=1)).isoformat(),
         )
         _stage_committed(backend, expired_decoy, backend_name)
         if backend_name == "mnemosyne":
@@ -290,7 +289,7 @@ def test_t12_cap_scope_ttl_preserve_current_records(
         backend._index.retain_block(tombstone)
         backend._index.complete_canonical_head(reservation, mutation)
         backend._index.complete_write_outbox(entry.commit_revision)
-        monkeypatch.setenv("LETHYX_BACKEND_INDEX_MAX_ROWS", "1")
+        monkeypatch.setenv("UM_MEM_BACKEND_INDEX_MAX_ROWS", "1")
 
         assert backend._index._evict_over_cap() == 0
         assert backend._index.expire_scope("workspace", "workspace", run_id="run") == 0
@@ -523,8 +522,8 @@ def test_t13_cli_defaults_to_dry_run_and_writes_content_free_audit(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
 ) -> None:
-    monkeypatch.delenv("LETHYX_BACKEND", raising=False)
-    monkeypatch.delenv("LETHYX_MEMORY_BACKEND", raising=False)
+    monkeypatch.delenv("UM_MEM_BACKEND", raising=False)
+    monkeypatch.delenv("UM_MEM_MEMORY_BACKEND", raising=False)
     assert (
         cli.main(
             [

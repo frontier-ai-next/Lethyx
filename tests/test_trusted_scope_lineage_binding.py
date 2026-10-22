@@ -2,12 +2,12 @@ from pathlib import Path
 
 import pytest
 
-from lethyx import MemoryClient
-from lethyx.contracts import MemoryBlockRecord, RecordBlockMembership
-from lethyx.memory.backends.query_policy import ensure_record_is_storable
-from lethyx.memory.backends.sqlite_index import BackendSQLiteIndex
-from lethyx.memory.recall_plan import RecallPlan
-from lethyx.memory.scopes import ScopeLineage, bind_scope_chain
+from um_mem import MemoryClient
+from um_mem.contracts import MemoryBlockRecord, RecordBlockMembership
+from um_mem.memory.backends.query_policy import ensure_record_is_storable
+from um_mem.memory.backends.sqlite_index import BackendSQLiteIndex
+from um_mem.memory.recall_plan import RecallPlan
+from um_mem.memory.scopes import ScopeLineage, bind_scope_chain
 
 
 class _RecordingBackend:

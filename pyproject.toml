@@ -3,7 +3,7 @@ requires = ["setuptools>=70"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "lethyx"
+name = "um-mem"
 version = "0.6.0"
 description = "Framework-neutral memory layer for agent systems."
 requires-python = ">=3.12"
@@ -40,21 +40,22 @@ mcp = ["mcp>=1.20.0,<2", "ruamel.yaml>=0.18,<1", "tomlkit>=0.13,<1"]
 docs = ["mkdocs-material>=9,<10"]
 
 [project.scripts]
-lethyx = "lethyx.memory.cli:main"
-lethyx-mcp = "lethyx.memory.mcp_server:main"
-lethyx-codex-hook = "lethyx.integrations.codex_hooks:main"
-lethyx-claude-hook = "lethyx.integrations.claude_hooks:main"
+um-memory = "um_mem.memory.cli:main"
+um-memory-mcp = "um_mem.memory.mcp_server:main"
+um-memory-codex-hook = "um_mem.integrations.codex_hooks:main"
+um-memory-claude-hook = "um_mem.integrations.claude_hooks:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]
-include = ["lethyx*"]
+include = ["um_mem*"]
 
 [tool.setuptools.package-data]
-"lethyx.memory.blocks" = ["*.yaml"]
+"um_mem.memory.blocks" = ["*.yaml"]
+"um_mem.memory" = ["panel/*.html", "panel/*.css", "panel/*.js"]
 
 [tool.coverage.run]
 branch = true
-source = ["src/lethyx"]
+source = ["src/um_mem"]
 
 [tool.coverage.report]
 show_missing = true
@@ -63,13 +64,6 @@ skip_covered = false
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 pythonpath = ["src"]
-markers = [
-    "memory_contract: core memory injection invariants",
-    "memory_slow: optional persistent backend matrix",
-    "hindsight: optional real Hindsight server tests",
-    "hindsight_real: requires real Hindsight server",
-    "llm_memory: opt-in LLM behavioral memory tests",
-]
 
 [tool.ruff]
 target-version = "py312"
@@ -84,7 +78,31 @@ extend-exclude = [
     "dist",
 ]
 
+[tool.ruff.lint]
+# The defaults of the pinned ruff release are the project policy. Ignore the
+# rules whose findings contradict a deliberate contract instead of papering
+# over them at call sites.
+ignore = [
+    # The public API raises ValueError for invalid types on purpose: 269 tests
+    # assert it and host integrations catch ValueError.
+    "TRY004",
+]
+
+[tool.ruff.lint.per-file-ignores]
+# These modules are documented "never raise" boundaries: optional advisory
+# tiers, the MCP transport, the host tool dispatcher, and the fail-closed
+# durable writer. A blind except there is the contract, not an accident.
+"src/um_mem/memory/mcp_facade.py" = ["BLE001"]
+"src/um_mem/memory/mcp_server.py" = ["BLE001"]
+"src/um_mem/memory/mcp_call.py" = ["BLE001"]
+"src/um_mem/memory/local_tier.py" = ["BLE001"]
+"src/um_mem/memory/memory_map.py" = ["BLE001"]
+"src/um_mem/memory/semantic.py" = ["BLE001"]
+"src/um_mem/memory/kernel/writer.py" = ["BLE001"]
+"src/um_mem/integrations/hermes_provider.py" = ["BLE001"]
+"tests/*" = ["BLE001"]
+
 [tool.mypy]
 python_version = "3.12"
-files = ["src/lethyx"]
+files = ["src/um_mem"]
 warn_unused_configs = true

@@ -2,9 +2,9 @@ from pathlib import Path
 
 import pytest
 
-from lethyx.api import MemoryClient
-from lethyx.memory import mcp_facade
-from lethyx.memory.backends.sqlite_index import BackendSQLiteIndex
+from um_mem.api import MemoryClient
+from um_mem.memory import mcp_facade
+from um_mem.memory.backends.sqlite_index import BackendSQLiteIndex
 
 
 def _client(tmp_path: Path) -> tuple[MemoryClient, BackendSQLiteIndex]:
@@ -127,7 +127,7 @@ def test_mcp_remember_requires_and_preserves_selected_block(monkeypatch, tmp_pat
     monkeypatch.setattr(mcp_facade, "_client", lambda **_kwargs: client)
     monkeypatch.setattr(mcp_facade, "_close_client", lambda _client: None)
     try:
-        saved = mcp_facade.lethyx_remember(
+        saved = mcp_facade.um_mem_remember(
             "The MCP path preserves a verified regression finding.",
             workspace_id="alpha",
             backend="test",

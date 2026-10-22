@@ -2,13 +2,13 @@ from dataclasses import FrozenInstanceError, replace
 
 import pytest
 
-from lethyx.contracts import (
+from um_mem.contracts import (
     ConsolidationDecision,
     EvidenceRef,
     MemoryBlockRecord,
     MemoryTransitionAssessment,
 )
-from lethyx.memory.consolidation import (
+from um_mem.memory.consolidation import (
     CONSOLIDATION_TRIGGERS,
     CanonicalConsolidationPipeline,
     ConsolidationScheduler,
