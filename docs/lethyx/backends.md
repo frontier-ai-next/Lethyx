@@ -151,7 +151,7 @@ ever loaded or downloaded; ask for native dense recall explicitly with
 The index covers the whole workspace: every write joins it in the background and
 `lethyx semantic-index` backfills what is missing, so a question in any script
 reaches old records and not only the newest window. Stored procedures are
-records of kind `procedure`; `lethyx memory-map` renders the workspace as one
+records of kind `procedure`; `lethyx map` renders the workspace as one
 self-contained HTML page for a human look.
 
 ## Switching backends

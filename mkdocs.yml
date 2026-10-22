@@ -58,6 +58,7 @@ nav:
       - Data and isolation: data_model.md
   - Get started:
       - Install and quickstart: quickstart.md
+      - Install and connect a harness: install.md
       - Hermes: hermes_runtime_integration_user_guide.md
       - MCP and Python: interfaces.md
       - Backends: backends.md

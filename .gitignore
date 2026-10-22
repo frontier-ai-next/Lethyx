@@ -28,3 +28,5 @@ coverage.xml
 htmlcov/
 site/
 public/
+
+npm/*.tgz

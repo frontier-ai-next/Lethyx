@@ -21,10 +21,24 @@ for diagnostics.
 
 Lethyx requires Python 3.12 or newer.
 
+Fast path with the npm launcher (Node 18+):
+
+```console
+npm install -g @lethyx/cli
+lethyx install
+lethyx setup
+```
+
+`lethyx setup` asks for the store, backend, harness and whether to enable the
+optional embedding tier, then connects the harness for you.
+
+Or install the Python package directly:
+
 ```console
 git clone https://github.com/frontier-ai-next/Lethyx.git
 cd Lethyx
-python -m pip install .
+python -m pip install ".[mcp]"
+lethyx setup
 ```
 
 For development from a clone:
@@ -32,6 +46,9 @@ For development from a clone:
 ```console
 python -m pip install -e ".[dev,mcp]"
 ```
+
+See [Install and connect a harness](docs/lethyx/install.md) for the backend
+matrix, harness paths, embedding trade-offs and troubleshooting.
 
 ### Optional: multilingual semantic tier
 

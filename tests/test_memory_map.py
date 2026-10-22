@@ -74,6 +74,11 @@ def test_memory_graph_renders_one_self_contained_page() -> None:
     assert "Restart the local service" in page
     assert "edit the source" in page
     assert "intfloat/multilingual-e5-large" in page
+    # Manual layout and inline block previews are part of the page contract.
+    assert "drag a card to move it" in page
+    assert "function resetLayout" in page
+    assert "node.subtext" in page
+    assert "data-reset" in page
     # The page must work offline: no external stylesheet, script or image.
     assert "src=\"http" not in page
     assert "href=\"http" not in page

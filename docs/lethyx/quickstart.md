@@ -3,6 +3,20 @@
 Lethyx supports Python 3.12 and newer. Use a dedicated virtual environment so
 the backend and host adapter use the same installed version.
 
+## Fast path
+
+```console
+npm install -g @lethyx/cli
+lethyx install
+lethyx setup
+lethyx doctor
+lethyx map
+```
+
+`setup` writes `~/.lethyx/config.json` and connects the harness you choose.
+After that, `lethyx map` needs no `--repo-root`, `--workspace` or `--backend`.
+See [Install and connect a harness](install.md) for the guided choices.
+
 ## Install from GitHub
 
 ```console
@@ -105,16 +119,24 @@ as a left-to-right mind map, with the root on the left, blocks as branches, and
 records as cards. Semantically related records are joined by faint dashed arcs.
 
 ```console
-python -m lethyx.memory.cli memory-map --backend mnemosyne --output memory-map.html
+lethyx setup    # once: choose the store, backend and harness
+lethyx map      # render and open the map
 ```
 
-Pass the backend you actually use (`mempalace`, `mnemosyne`, `zvec`, or
-`hindsight`); without `--backend` the command reads the legacy MemPalace store.
+`lethyx map` uses the configured store, workspace and backend. The older
+explicit form still works for scripts:
+
+```console
+lethyx memory-map --backend mnemosyne --output memory-map.html
+```
+
 The page has no external assets, so it opens offline. Click a card to read it,
-click the chevron to fold a branch, search or filter by kind, toggle the
-similarity arcs, and switch between the light and dark theme. The same page is
-written on demand by the `memory_map` tool, so the snapshot is never more than
-one call away.
+drag a card to move it (a block carries its records with it), click the chevron
+to fold a branch, search or filter by kind, toggle the similarity arcs, and
+switch between the light and dark theme. Manual positions are kept per browser;
+the reset button (or a double-click on empty space) restores the tidy layout.
+The same page is written on demand by the `memory_map` tool, so the snapshot is
+never more than one call away.
 
 ## Choose one backend
 
