@@ -2092,7 +2092,15 @@ def test_routed_policy_rejection_replays_through_common_dispatcher(
         "backend": "mempalace",
         "workspace_id": "alpha",
     }
+    route_decision = first.pop("route_decision")
+    assert route_decision["accepted"] is False
+    assert route_decision["reason"] == "agent_write_requires_typed_promotion_route"
+    assert route_decision["suggested_block_id"] == "decisions_and_contracts"
+    assert route_decision["policy_issues"]
     assert first == expected
+
+    replayed_route_decision = replayed.pop("route_decision")
+    assert replayed_route_decision == route_decision
     assert replayed == {**expected, "replayed": True}
     receipt_path = identity.repo_root / ".Lethyx" / "memory" / "service_receipts.sqlite"
     with sqlite3.connect(receipt_path) as connection:

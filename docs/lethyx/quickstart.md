@@ -24,6 +24,98 @@ For a development checkout:
 python -m pip install -e ".[dev,mcp]"
 ```
 
+## Optional: multilingual semantic tier
+
+The default install is small and runs on any machine. It never downloads a
+model. A local semantic tier is available as an extra:
+
+```console
+python -m pip install "lethyx[semantic]"
+```
+
+The tier downloads one multilingual sentence-embedding model the first time it
+is used (about 2.1 GB, CPU only, no API key, no network at query time) and
+lets a question written in one script reach a record written in another
+script. Without the extra, Lethyx keeps the script-neutral lexical tier and
+nothing is downloaded.
+
+| Variable | Meaning |
+| --- | --- |
+| `LETHYX_SEMANTIC` | `0` switches the tier off. Default is on when the extra is installed. |
+| `LETHYX_SEMANTIC_MODEL` | Model id. Default `intfloat/multilingual-e5-large`. |
+| `LETHYX_SEMANTIC_CACHE_DIR` | Where the model files live. Default `<lethyx home>/cache/fastembed`. |
+| `LETHYX_SEMANTIC_FLOOR` | Minimum similarity that counts as a hit. Default is chosen per model. |
+| `LETHYX_SEMANTIC_WARMUP` | `0` defers the model load to the first question instead of warming it in the background at service start. |
+| `LETHYX_SEMANTIC_IDLE_SECONDS` | How long an unused model stays loaded. Default 120. `0` keeps it loaded. |
+
+The embeddings only reorder candidates. The stored record text stays the
+evidence, and a question with no real match returns nothing instead of a
+plausible-looking record.
+
+The model is a few gigabytes of resident memory. It is loaded in the local
+service, released again after two idle minutes, and loaded on the next
+question, so it is only in memory while it is actually used.
+
+The semantic index covers the whole workspace, not only the newest records.
+Every write joins the index in the background, and
+`python -m lethyx.memory.cli semantic-index` backfills everything that is
+missing. A question in any script therefore reaches old records too.
+
+The relevance floor is measured, not guessed:
+`python -m lethyx.memory.cli semantic-calibrate` probes the workspace with
+relevant and irrelevant questions in several scripts, reports the background
+level and writes the measured floor next to the index. The measured floor
+never drops below the model default, and `LETHYX_SEMANTIC_FLOOR` still
+overrides everything.
+
+## Procedures
+
+A procedure is a record of kind `procedure`. It carries the steps, how the
+result is verified, and when it was last confirmed:
+
+```python
+from lethyx.memory.mcp_facade import lethyx_remember
+
+lethyx_remember(
+    "Restart the local service after editing the source.",
+    title="Restart the local service",
+    kind="procedure",
+    tags=["lethyx", "procedure"],
+    requested_block_id=leaf_id,
+    metadata={
+        "steps": ["edit the source", "restart the service", "check health"],
+        "verify": "health returns ok",
+        "verified_at": "2026-10-22T00:00:00Z",
+        "stale_after_days": 60,
+    },
+)
+```
+
+`procedure({ query })` returns them as checklists with a freshness label
+(`fresh`, `aging`, `stale`, `unverified`). A procedure that outlived its
+environment is reported as stale, because a stale procedure is worse than no
+procedure at all. Every procedure is stamped with the environment it was
+written against, so a change of the Lethyx version or the semantic model is
+reported as the reason it went stale, not just the number of days.
+
+## Looking at the memory
+
+The workspace can be rendered as one self-contained HTML page: the block tree
+as a left-to-right mind map, with the root on the left, blocks as branches, and
+records as cards. Semantically related records are joined by faint dashed arcs.
+
+```console
+python -m lethyx.memory.cli memory-map --backend mnemosyne --output memory-map.html
+```
+
+Pass the backend you actually use (`mempalace`, `mnemosyne`, `zvec`, or
+`hindsight`); without `--backend` the command reads the legacy MemPalace store.
+The page has no external assets, so it opens offline. Click a card to read it,
+click the chevron to fold a branch, search or filter by kind, toggle the
+similarity arcs, and switch between the light and dark theme. The same page is
+written on demand by the `memory_map` tool, so the snapshot is never more than
+one call away.
+
 ## Choose one backend
 
 MemPalace is the simplest local starting point and is installed with Lethyx:

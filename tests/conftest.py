@@ -97,6 +97,29 @@ def _force_reap_verified_pytest_listener(pid: int, repo_root: Path) -> None:
     )
 
 
+@pytest.fixture(autouse=True, scope="session")
+def _keep_embedding_models_out_of_the_test_suite():
+    """Never download or load an embedding model during the test run.
+
+    Both the native backend and the local semantic tier are optional at
+    runtime. Tests must not depend on a model download, so both are switched
+    off here and switched on explicitly by the tests that exercise them.
+    """
+
+    previous = {
+        name: os.environ.get(name)
+        for name in ("MNEMOSYNE_NO_EMBEDDINGS", "LETHYX_SEMANTIC")
+    }
+    os.environ["MNEMOSYNE_NO_EMBEDDINGS"] = "1"
+    os.environ["LETHYX_SEMANTIC"] = "0"
+    yield
+    for name, value in previous.items():
+        if value is None:
+            os.environ.pop(name, None)
+        else:
+            os.environ[name] = value
+
+
 @pytest.fixture(autouse=True)
 def _reap_pytest_tmp_listeners(request: pytest.FixtureRequest):
     """Never leave a listener owned by a completed pytest temporary test root."""

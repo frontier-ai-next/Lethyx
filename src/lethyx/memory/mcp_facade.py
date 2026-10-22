@@ -8,13 +8,15 @@ rules stay independent of the transport.
 import hashlib
 import json
 import os
+import threading
 from collections.abc import Iterator
 from contextlib import contextmanager
 from contextvars import ContextVar
 from dataclasses import asdict, is_dataclass, replace
+from datetime import datetime, timezone
 from pathlib import Path
 from time import perf_counter_ns
-from typing import Any, Iterable, Literal, cast
+from typing import Any, Iterable, Literal, Mapping, cast
 
 from lethyx import MemoryClient
 from lethyx.contracts import (
@@ -62,6 +64,7 @@ from lethyx.memory.context_payload import (
     pack_evidence_payload,
 )
 from lethyx.memory.kernel.telemetry import record_memory_event
+from lethyx.memory import local_tier
 from lethyx.memory.obsidian_export import export_backend_to_obsidian
 from lethyx.memory.paths import normalize_workspace_id
 from lethyx.memory.recall_plan import RecallPlan, RetrievalMode, SourceHorizon
@@ -1319,14 +1322,22 @@ def lethyx_block_map(
     workspace_id: str = "",
     backend: str = "",
     repo_root: str = "",
+    depth: int = 1,
+    include_meta: bool = False,
 ) -> dict[str, Any]:
     client = _client(repo_root=repo_root, workspace_id=workspace_id, backend=backend)
     try:
+        if depth == 1 and not include_meta:
+            roots = client.block_map()
+        elif depth == 1:
+            roots = client.block_map(include_meta=True)
+        else:
+            roots = client.block_map(depth=depth, include_meta=include_meta)
         return {
             "ok": True,
             "workspace_id": client.workspace_id,
             "backend": _default_backend(backend),
-            "roots": _as_jsonable(client.block_map()),
+            "roots": _as_jsonable(roots),
         }
     except Exception as exc:
         payload = _safe_error(exc)
@@ -1587,10 +1598,42 @@ def lethyx_revive_block(
         _close_client(client)
 
 
+def lethyx_convert_block_to_index(
+    block_id: str,
+    expected_revision: int,
+    reason: str,
+    workspace_id: str = "",
+    backend: str = "",
+    repo_root: str = "",
+) -> dict[str, Any]:
+    """Convert an empty leaf into an index-only parent so it can hold children."""
+
+    client = _client(repo_root=repo_root, workspace_id=workspace_id, backend=backend)
+    try:
+        return {
+            **_as_jsonable(
+                client.convert_block_to_index(
+                    block_id,
+                    expected_revision=expected_revision,
+                    reason=reason,
+                )
+            ),
+            "backend": _default_backend(backend),
+        }
+    except Exception as exc:
+        payload = _safe_error(exc)
+        payload["workspace_id"] = client.workspace_id
+        payload["backend"] = _default_backend(backend)
+        return payload
+    finally:
+        _close_client(client)
+
+
 def lethyx_delete_block(
     block_id: str,
     expected_revision: int,
     reason: str,
+    cascade: bool = False,
     workspace_id: str = "",
     backend: str = "",
     repo_root: str = "",
@@ -1603,6 +1646,7 @@ def lethyx_delete_block(
                     block_id,
                     expected_revision=expected_revision,
                     reason=reason,
+                    cascade=cascade,
                 )
             ),
             "backend": _default_backend(backend),
@@ -2110,6 +2154,21 @@ def lethyx_remember(
             remember_metadata["source_segments"] = source_segments
         if selected_operation == "repair":
             remember_metadata["repair_of"] = repair_reference
+        if str(kind or "") == "procedure":
+            # A procedure is stamped with the environment it was written
+            # against, so a later change can be reported as the reason it went
+            # stale instead of a bare number of days.
+            from lethyx.memory import procedures as procedure_rules
+            from lethyx.memory import semantic as semantic_tier
+
+            remember_metadata = procedure_rules.stamp_metadata(
+                remember_metadata,
+                procedure_rules.current_descriptor(
+                    repo_root=client.repo_root,
+                    model=semantic_tier.default_model(),
+                    workspace_id=client.workspace_id,
+                ),
+            )
         if write_mode not in {"standard", "lossless_atomic"}:
             raise ValueError("write_mode must be standard or lossless_atomic")
         result = client.remember(
@@ -2207,6 +2266,15 @@ def lethyx_remember(
                 payload[field_name] = _as_jsonable(raw[field_name])
         if result.saved:
             payload["actual_block_id"] = str(route_decision.get("block_id") or "")
+            try:
+                _schedule_semantic_index(
+                    client.repo_root,
+                    client.workspace_id,
+                    str(getattr(client, "profile_id", "default") or "default"),
+                    client.read_exact_record(record_id=str(result.memory_id)),
+                )
+            except Exception:  # pragma: no cover - advisory cache
+                pass
         for field_name in ("scope", "scope_id", "project_id", "user_id"):
             persisted_value = raw.get(field_name)
             if isinstance(persisted_value, str):
@@ -2226,6 +2294,155 @@ def lethyx_remember(
         return payload
     finally:
         _close_client(client)
+
+
+def _procedure_entry(
+    record: Mapping[str, Any], descriptor: Mapping[str, Any] | None = None
+) -> dict[str, Any]:
+    """Return one stored procedure as a checklist with its freshness."""
+
+    from lethyx.memory import procedures as procedure_rules
+
+    return procedure_rules.procedure_entry(record, descriptor)
+
+
+def lethyx_procedure(
+    query: str,
+    workspace_id: str = "",
+    backend: str = "",
+    repo_root: str = "",
+    limit: int = 3,
+) -> dict[str, Any]:
+    """Return stored procedures as checklists with their freshness.
+
+    A procedure is a record of kind ``procedure``. It carries the steps, how
+    the result is verified, and when it was last confirmed. A procedure that
+    outlived its environment is reported as stale, because a stale procedure
+    is worse than no procedure at all.
+    """
+
+    from lethyx.memory import procedures as procedure_rules
+    from lethyx.memory import semantic as semantic_tier
+    from lethyx.memory import text as universal_text
+
+    client = _client(repo_root=repo_root, workspace_id=workspace_id, backend=backend)
+    try:
+        safe_limit = max(1, int(limit or 3))
+        candidates: list[Mapping[str, Any]] = []
+        embedder = semantic_tier.get_embedder(
+            cache_dir=semantic_tier.default_cache_dir(client.repo_root)
+        )
+        if embedder is not None:
+            index = semantic_tier.SemanticIndex(
+                semantic_tier.semantic_index_path(client.repo_root, client.workspace_id)
+            )
+            cross_script = semantic_tier.query_uses_non_ascii_script(str(query or ""))
+            try:
+                ranked = semantic_tier.rank_global(
+                    str(query or ""),
+                    embedder=embedder,
+                    index=index,
+                    profile=str(getattr(client, "profile_id", "default") or "default"),
+                    floor=semantic_tier.effective_floor(
+                        embedder.model,
+                        cross_script=cross_script,
+                        calibrated=semantic_tier.calibrated_floor(
+                            client.repo_root, client.workspace_id, embedder.model
+                        ),
+                    ),
+                    limit=safe_limit * 3,
+                    loader=_record_loader(client),
+                    kinds=["procedure"],
+                )
+            except Exception:  # pragma: no cover - advisory tier
+                ranked = []
+            candidates = [record for _identifier, _score, record in ranked]
+        if not candidates:
+            window = [
+                entry
+                for entry in _local_window(client)
+                if str(entry.get("kind") or "") == "procedure"
+            ]
+            if window:
+                titles = [str(entry.get("title") or "") for entry in window]
+                documents = [
+                    f"{entry.get('title') or ''}\n{entry.get('content') or ''}"
+                    for entry in window
+                ]
+                ranked_ids = universal_text.rank(
+                    str(query or ""), documents, titles=titles, limit=safe_limit * 3
+                )
+                candidates = [window[index] for index, _score, _terms in ranked_ids]
+        descriptor = procedure_rules.current_descriptor(
+            repo_root=client.repo_root,
+            model=semantic_tier.default_model(),
+            workspace_id=client.workspace_id,
+        )
+        procedures = [
+            _procedure_entry(record, descriptor) for record in candidates
+        ][:safe_limit]
+        return {
+            "ok": True,
+            "workspace_id": client.workspace_id,
+            "query": str(query or ""),
+            "count": len(procedures),
+            "procedures": procedures,
+        }
+    except Exception as exc:
+        payload = _safe_error(exc)
+        payload["workspace_id"] = client.workspace_id
+        payload["procedures"] = []
+        return payload
+    finally:
+        _close_client(client)
+
+
+def lethyx_memory_map(
+    workspace_id: str = "",
+    backend: str = "",
+    repo_root: str = "",
+    profile_id: str = "default",
+    output_path: str = "",
+) -> dict[str, Any]:
+    """Render the memory graph and write it to a file.
+
+    The graph is a snapshot, so it is written on demand: this call refreshes
+    the file and returns where it is.
+    """
+
+    from lethyx.memory.memory_map import (
+        collect_memory_map,
+        memory_map_summary,
+        write_memory_map,
+    )
+
+    try:
+        target = str(output_path or "").strip()
+        if not target:
+            target = str(Path(repo_root or ".").resolve() / "memory-map.html")
+        written = write_memory_map(
+            repo_root or ".",
+            target,
+            workspace_id=workspace_id,
+            profile_id=profile_id,
+            backend=backend,
+        )
+        data = collect_memory_map(
+            repo_root or ".",
+            workspace_id=workspace_id,
+            profile_id=profile_id,
+            backend=backend,
+        )
+        return {
+            "ok": True,
+            "workspace_id": workspace_id,
+            "path": str(written),
+            "summary": memory_map_summary(data),
+        }
+    except Exception as exc:
+        payload = _safe_error(exc)
+        payload["workspace_id"] = workspace_id
+        return payload
 
 
 def lethyx_observe(
@@ -2414,23 +2631,25 @@ def lethyx_list_records(
     logical_block_id: str = "",
     limit: int = 32,
     cursor: str = "",
+    include_retracted: bool = False,
     workspace_id: str = "",
     backend: str = "",
     repo_root: str = "",
 ) -> dict[str, Any]:
     client = _client(repo_root=repo_root, workspace_id=workspace_id, backend=backend)
     try:
+        arguments: dict[str, Any] = {
+            "scope": scope,
+            "scope_id": scope_id,
+            "logical_block_id": logical_block_id,
+            "limit": limit,
+            "cursor": cursor,
+        }
+        if include_retracted:
+            arguments["include_retracted"] = True
         return {
             "ok": True,
-            **_json_object(
-                client.list_records(
-                    scope=scope,
-                    scope_id=scope_id,
-                    logical_block_id=logical_block_id,
-                    limit=limit,
-                    cursor=cursor,
-                )
-            ),
+            **_json_object(client.list_records(**arguments)),
             "workspace_id": client.workspace_id,
             "backend": _default_backend(backend),
         }
@@ -2440,6 +2659,50 @@ def lethyx_list_records(
             "workspace_id": client.workspace_id,
             "backend": _default_backend(backend),
         }
+    finally:
+        _close_client(client)
+
+
+def lethyx_recent(
+    limit: int = 8,
+    since: str = "",
+    scope: MemoryScope = "workspace",
+    scope_id: str = "",
+    logical_block_id: str = "",
+    include_candidates: bool = True,
+    workspace_id: str = "",
+    backend: str = "",
+    repo_root: str = "",
+) -> dict[str, Any]:
+    """Return the newest canonical records, newest first, for continuity."""
+
+    client = _client(repo_root=repo_root, workspace_id=workspace_id, backend=backend)
+    try:
+        records = client.recent_records(
+            limit=limit,
+            since=since,
+            scope=scope,
+            scope_id=scope_id,
+            logical_block_id=logical_block_id,
+            include_candidates=include_candidates,
+        )
+        return {
+            "ok": True,
+            "records": [_as_jsonable(record) for record in records],
+            "count": len(records),
+            "scope": scope,
+            "scope_id": scope_id or client.workspace_id,
+            "logical_block_id": logical_block_id,
+            "since": since,
+            "workspace_id": client.workspace_id,
+            "backend": _default_backend(backend),
+        }
+    except Exception as exc:
+        payload = _safe_error(exc)
+        payload["workspace_id"] = client.workspace_id
+        payload["backend"] = _default_backend(backend)
+        payload["records"] = []
+        return payload
     finally:
         _close_client(client)
 
@@ -2524,6 +2787,144 @@ def lethyx_read_working_set(
         return _safe_error(exc)
     finally:
         _close_client(client)
+
+
+def _window_entry(record: Any) -> dict[str, Any]:
+    """Return one canonical record in the shape the local tier expects."""
+
+    membership = getattr(record, "block_membership", None)
+    primary = str(getattr(membership, "primary_block_id", "") or "")
+    metadata = getattr(record, "metadata", None)
+    return {
+        "record_id": str(getattr(record, "block_id", "") or ""),
+        "title": str(getattr(record, "title", "") or ""),
+        "content": str(getattr(record, "content", "") or ""),
+        "kind": str(getattr(record, "kind", "") or ""),
+        "tags": list(getattr(record, "tags", ()) or ()),
+        "status": str(getattr(record, "status", "") or ""),
+        "revision_id": str(getattr(record, "revision_id", "") or ""),
+        "recorded_at": str(getattr(record, "recorded_at", "") or ""),
+        "authority": str(getattr(record, "authority", "") or ""),
+        "sensitivity": str(getattr(record, "sensitivity", "") or ""),
+        "content_mode": str(getattr(record, "content_mode", "") or ""),
+        "operational_risk": str(getattr(record, "operational_risk", "") or ""),
+        "metadata": dict(metadata) if isinstance(metadata, Mapping) else {},
+        "block_membership": {"primary_block_id": primary},
+    }
+
+
+def _local_window(client: Any) -> list[dict[str, Any]]:
+    """Return the newest records as plain dictionaries for the local tier.
+
+    The local tier scores a bounded window of the newest records when the
+    native backend cannot answer. It runs in this process, so the embedding
+    model stays warm for the next call.
+    """
+
+    records = client.recent_records(
+        limit=local_tier.FALLBACK_SCAN_LIMIT,
+        scope="workspace",
+        scope_id=client.workspace_id,
+        include_candidates=True,
+    )
+    return [_window_entry(record) for record in records]
+
+
+def _record_loader(client: Any) -> Any:
+    """Return a loader that reads canonical records by identity.
+
+    The semantic index covers the whole workspace, so a cross-language
+    question can reach a record that is not in the newest window. The text is
+    always read back from the canonical store, never from the index.
+    """
+
+    def load(record_ids: Any) -> list[dict[str, Any]]:
+        identifiers = [str(value).strip() for value in record_ids if str(value).strip()]
+        if not identifiers:
+            return []
+        try:
+            records = client.read_exact_records(identifiers[:128])
+        except Exception:
+            records = []
+        loaded: list[dict[str, Any]] = []
+        for record in records:
+            status = str(getattr(record, "status", "") or "").casefold()
+            if status in {"retracted", "superseded", "deprecated", "expired", "quarantined"}:
+                continue
+            loaded.append(_window_entry(record))
+        return loaded
+
+    return load
+
+
+def _schedule_semantic_index(
+    repo_root: Any, workspace_id: str, profile_id: str, record: Any
+) -> None:
+    """Add a freshly written record to the semantic index in the background.
+
+    The index is what makes a cross-language question reach old records, so
+    every write joins it. The work happens in the background and never delays
+    the write itself.
+    """
+
+    from lethyx.memory import semantic as semantic_tier
+
+    identifier = str(getattr(record, "block_id", "") or "")
+    title = str(getattr(record, "title", "") or "")
+    content = str(getattr(record, "content", "") or "")
+    if not identifier or not content:
+        return
+
+    def run() -> None:
+        try:
+            embedder = semantic_tier.get_embedder(
+                cache_dir=semantic_tier.default_cache_dir(repo_root)
+            )
+            if embedder is None:
+                return
+            index = semantic_tier.SemanticIndex(
+                semantic_tier.semantic_index_path(repo_root, workspace_id)
+            )
+            semantic_tier.embed_record(
+                index,
+                embedder,
+                profile=profile_id,
+                record_id=identifier,
+                title=title,
+                content=content,
+                kind=str(getattr(record, "kind", "") or ""),
+            )
+        except Exception:  # pragma: no cover - advisory cache
+            return
+
+    threading.Thread(
+        target=run,
+        name="lethyx-semantic-index",
+        daemon=True,
+    ).start()
+
+
+def _apply_local_tier(
+    result: dict[str, Any],
+    *,
+    name: str,
+    query: str,
+    limit: int,
+    arguments: dict[str, Any],
+    client: Any,
+) -> dict[str, Any]:
+    """Score the local window when the native backend could not answer."""
+
+    return local_tier.apply_local_tier(
+        result,
+        name=name,
+        arguments=arguments,
+        records_provider=lambda: _local_window(client),
+        record_loader=_record_loader(client),
+        repo_root=client.repo_root,
+        workspace_id=client.workspace_id,
+        profile=str(getattr(client, "profile_id", "default") or "default"),
+    )
 
 
 def lethyx_recall(
@@ -2641,7 +3042,7 @@ def lethyx_recall(
             candidate_count=len(records),
             selected_ids=selected_ids,
         )
-        return {
+        result = {
             "ok": True,
             "workspace_id": client.workspace_id,
             "backend": _default_backend(backend),
@@ -2652,6 +3053,28 @@ def lethyx_recall(
             "diagnostics": _agent_diagnostics(diagnostics),
             "hits": hits,
         }
+        return _apply_local_tier(
+            result,
+            name="recall",
+            query=query,
+            limit=safe_limit,
+            arguments={
+                "query": query,
+                "limit": safe_limit,
+                "tags": list(tags or ()),
+                "include_candidates": include_candidates,
+                "source_horizon": source_horizon,
+                "source_speakers": list(source_speakers or ()),
+                "logical_block_ids": list(logical_block_ids or ()),
+                "record_ids": list(record_ids or ()),
+                "temporal_mode": temporal_mode,
+                "as_of": as_of,
+                "known_as_of": known_as_of,
+                "revision_id": revision_id,
+                "max_tokens": max_tokens,
+            },
+            client=client,
+        )
     except Exception as exc:
         payload = _safe_error(exc)
         payload["workspace_id"] = client.workspace_id
@@ -2827,7 +3250,29 @@ def lethyx_build_context(
                     ),
                 },
             )
-        return payload
+        return _apply_local_tier(
+            payload,
+            name="build_context",
+            query=query,
+            limit=max(1, int(limit or 4)),
+            arguments={
+                "query": query,
+                "limit": max(1, int(limit or 4)),
+                "tags": list(tags or ()),
+                "include_candidates": include_candidates,
+                "source_horizon": source_horizon,
+                "source_speakers": list(source_speakers or ()),
+                "logical_block_ids": list(logical_block_ids or ()),
+                "record_ids": list(record_ids or ()),
+                "temporal_mode": temporal_mode,
+                "as_of": as_of,
+                "known_as_of": known_as_of,
+                "revision_id": revision_id,
+                "max_tokens": max_tokens,
+                "render_context": render_context,
+            },
+            client=client,
+        )
     except Exception as exc:
         payload = _safe_error(exc)
         payload.update(

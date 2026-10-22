@@ -104,6 +104,7 @@ from lethyx.memory.blocks.registry import (
     amend_workspace_block,
     archive_workspace_block,
     archive_workspace_session_block,
+    convert_workspace_block_to_index,
     create_workspace_block,
     load_memory_blocks,
     load_workspace_topology,
@@ -520,6 +521,10 @@ def _hit_allowed(hit: MemoryHit, plan: RecallPlan) -> bool:
         membership = record.block_membership
         if membership is None or membership.primary_block_id not in set(plan.logical_block_ids):
             return False
+    if plan.tags:
+        record_tags = {str(tag).casefold() for tag in record.tags}
+        if any(str(tag).casefold() not in record_tags for tag in plan.tags):
+            return False
     return True
 
 
@@ -661,6 +666,36 @@ def _serialize_same_creation(method: Callable[_P, _R]) -> Callable[_P, _R]:
             return method(*args, **kwargs)
 
     return call
+
+
+def _recorded_at_instant(value: str) -> datetime:
+    """Parse one recorded_at into a comparable UTC instant."""
+
+    text = str(value or "").strip()
+    if not text:
+        return datetime.min.replace(tzinfo=timezone.utc)
+    try:
+        parsed = datetime.fromisoformat(text.replace("Z", "+00:00"))
+    except ValueError:
+        return datetime.min.replace(tzinfo=timezone.utc)
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=timezone.utc)
+    return parsed.astimezone(timezone.utc)
+
+
+def _recent_cutoff(value: str) -> datetime | None:
+    """Validate an optional lower bound for the recent-records view."""
+
+    text = str(value or "").strip()
+    if not text:
+        return None
+    try:
+        parsed = datetime.fromisoformat(text.replace("Z", "+00:00"))
+    except ValueError as exc:
+        raise ValueError("recent since must be an ISO-8601 timestamp") from exc
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=timezone.utc)
+    return parsed.astimezone(timezone.utc)
 
 
 class MemoryClient:
@@ -876,6 +911,7 @@ class MemoryClient:
         logical_block_id: str = "",
         limit: int = 32,
         cursor: str = "",
+        include_retracted: bool = False,
     ) -> dict[str, Any]:
         """Enumerate one explicit scope from a bounded, frozen ID/revision snapshot."""
 
@@ -889,6 +925,8 @@ class MemoryClient:
             raise ValueError("list_records limit must be 1-128")
         if not isinstance(cursor, str):
             raise ValueError("list_records cursor must be a string")
+        if type(include_retracted) is not bool:
+            raise ValueError("list_records include_retracted must be a boolean")
 
         if cursor:
             if len(cursor) > 4096:
@@ -969,6 +1007,12 @@ class MemoryClient:
                 ),
                 key=lambda record: (record.recorded_at, record.block_id),
             )
+            if not include_retracted:
+                current_ids = self._current_record_id_set(records)
+                if current_ids is not None:
+                    records = [
+                        record for record in records if record.block_id in current_ids
+                    ]
             if len(records) > 2048:
                 raise ValueError("list_records scope exceeds 2048 records; select a narrower scope")
             selected = [[record.block_id, record.revision_id] for record in records]
@@ -1023,6 +1067,98 @@ class MemoryClient:
             "scope_id": scope_id,
             "logical_block_id": logical_block_id,
         }
+
+    def recent_records(
+        self,
+        *,
+        limit: int = 10,
+        since: str = "",
+        scope: MemoryScope = "workspace",
+        scope_id: str = "",
+        logical_block_id: str = "",
+        include_candidates: bool = True,
+    ) -> list[MemoryBlockRecord]:
+        """Return the newest canonical records for one scope, newest first."""
+
+        if scope not in {"user_global", "workspace", "project", "session", "task", "subtask"}:
+            raise ValueError("recent_records requires a typed scope")
+        if type(limit) is not int or not 1 <= limit <= 128:
+            raise ValueError("recent_records limit must be 1-128")
+        if not isinstance(scope_id, str) or scope_id != scope_id.strip():
+            raise ValueError("recent_records requires an exact scope_id")
+        if not isinstance(logical_block_id, str) or logical_block_id != logical_block_id.strip():
+            raise ValueError("recent_records requires an exact logical_block_id")
+        effective_scope_id = scope_id or (self.workspace_id if scope == "workspace" else "")
+        if not effective_scope_id:
+            raise ValueError("recent_records requires an exact scope_id")
+        cutoff = _recent_cutoff(since)
+        scope_key = f"{scope}:{effective_scope_id}"
+
+        candidates: list[MemoryBlockRecord] = []
+        for candidate_id in self.backend.scoped_record_ids(
+            workspace_id=self.workspace_id,
+            profile_id=self.profile_id,
+            scope_key=scope_key,
+            logical_block_id=logical_block_id,
+        ):
+            record = self.backend.get_block(candidate_id, workspace_id=self.workspace_id)
+            if not isinstance(record, MemoryBlockRecord):
+                continue
+            if (
+                record.workspace_id != self.workspace_id
+                or record.profile_id != self.profile_id
+                or record.scope != scope
+                or memory_scope_key(record) != scope_key
+                or record.delivery_policy == "hidden"
+                or record.block_membership is None
+            ):
+                continue
+            if logical_block_id and record.block_membership.primary_block_id != logical_block_id:
+                continue
+            if not include_candidates and record.status == "candidate":
+                continue
+            candidates.append(record)
+
+        # A retraction or supersession writes a successor record and demotes the
+        # original membership, but the original keeps its own status, so the
+        # scoped id list alone still contains it. Intersect with the canonical
+        # current set so `recent` never presents retracted evidence as current.
+        current_ids = self._current_record_id_set(candidates)
+
+        records: list[MemoryBlockRecord] = []
+        for record in candidates:
+            if current_ids is not None and record.block_id not in current_ids:
+                continue
+            if cutoff is not None and _recorded_at_instant(record.recorded_at) < cutoff:
+                continue
+            records.append(record)
+        records.sort(
+            key=lambda record: (_recorded_at_instant(record.recorded_at), record.block_id),
+            reverse=True,
+        )
+        return records[:limit]
+
+    def _current_record_id_set(
+        self, records: list[MemoryBlockRecord]
+    ) -> set[str] | None:
+        """Return ids that are still current for their logical block, if provable."""
+
+        lookup = getattr(self.backend, "record_ids_for_logical_blocks", None)
+        if not callable(lookup) or not records:
+            return None
+        block_ids = tuple(
+            dict.fromkeys(
+                record.block_membership.primary_block_id
+                for record in records
+                if record.block_membership is not None
+                and record.block_membership.primary_block_id
+            )
+        )
+        if not block_ids:
+            return None
+        return set(
+            lookup(block_ids, workspace_id=self.workspace_id, profile_id=self.profile_id)
+        )
 
     def _record_list_snapshot(
         self, snapshot_id: str, records: list[list[str]] | None = None
@@ -1410,7 +1546,7 @@ class MemoryClient:
                     f"{descriptor.guidance.synopsis} Coverage: {record_count} canonical record(s)."
                 )
             get_index_node = getattr(self.backend, "get_index_node", None)
-            if canonical_records is None and callable(get_index_node):
+            if canonical_records is None and snapshot is None and callable(get_index_node):
                 node = get_index_node(
                     block_descriptor_node_id(self.workspace_id, block.block_id),
                     workspace_id=self.workspace_id,
@@ -1530,28 +1666,70 @@ class MemoryClient:
         )
         return view
 
-    def block_map(self) -> list[dict[str, Any]]:
+    def block_map(
+        self, *, depth: int = 1, include_meta: bool = False
+    ) -> list[dict[str, Any]]:
+        if type(depth) is not int or not 1 <= depth <= 8:
+            raise ValueError("block_map depth must be an integer from 1 to 8")
         states = load_workspace_topology(
             self.repo_root,
             self.workspace_id,
             profile_id=self.profile_id,
         )
-        blocks = [state.block for state in states]
         states_by_id = {state.block_id: state for state in states}
+        if include_meta:
+            # The protected catalog is the routing meta-tree. Records written to
+            # its leaves are real canonical records, so navigation must be able
+            # to see those leaves; otherwise a valid suggested route points at
+            # an invisible target.
+            blocks = load_memory_blocks(
+                self.repo_root,
+                self.workspace_id,
+                profile_id=self.profile_id,
+            )
+        else:
+            blocks = [state.block for state in states]
+        blocks_by_id = {block.block_id: block for block in blocks}
         child_ids_by_parent = self._catalog_child_ids(blocks)
         catalog = compile_semantic_catalog(blocks)
-        root_blocks = [block for block in blocks if not block.parent_id]
-        return [
-            self._block_catalog_view(
+
+        def view(block: MemoryBlock, path: tuple[str, ...]) -> dict[str, Any]:
+            payload = self._block_catalog_view(
                 block,
                 catalog.descriptor(block.block_id),
-                include_index_state=False,
-                path=(block.block_id,),
+                include_index_state=depth > 1,
+                path=path,
                 child_ids=child_ids_by_parent[block.block_id],
-                topology_state=states_by_id[block.block_id],
+                topology_state=states_by_id.get(block.block_id),
             )
-            for block in root_blocks
-        ]
+            is_meta = block.block_id not in states_by_id
+            payload["meta"] = is_meta
+            payload["node_kind"] = "meta" if is_meta else "workspace"
+            if is_meta and block.block_id == "memory_root_index":
+                payload["description"] = (
+                    "Protected meta-node taxonomy for routing agent-authored memory."
+                )
+                payload["synopsis"] = payload["description"]
+                if depth > 1:
+                    payload["synopsis"] += (
+                        f" Coverage: {payload['record_count']} canonical record(s)."
+                    )
+            if len(path) < depth:
+                children = []
+                for child_id in child_ids_by_parent[block.block_id]:
+                    child = blocks_by_id.get(child_id)
+                    if child is None or child_id in path:
+                        continue
+                    children.append(view(child, path + (child_id,)))
+                if children:
+                    payload["children"] = children
+            return payload
+
+        root_blocks = [block for block in blocks if not block.parent_id]
+        # Keep the agent-authored workspace root first; the protected meta-tree
+        # is an additional routing surface, not a replacement for it.
+        root_blocks.sort(key=lambda block: (block.block_id not in states_by_id, block.name))
+        return [view(block, (block.block_id,)) for block in root_blocks]
 
     def catalog_snapshot(self) -> dict[str, Any]:
         """Return one bounded-consumer snapshot without per-block database scans."""
@@ -1635,7 +1813,13 @@ class MemoryClient:
             edges_by_block = {state.block_id: store.edges_for(state.block_id) for state in states}
         finally:
             store.close()
-        blocks = [state.block for state in states]
+        # Expand both the agent-authored workspace tree and the protected
+        # meta-tree. A record can legitimately live in either one.
+        blocks = load_memory_blocks(
+            self.repo_root,
+            self.workspace_id,
+            profile_id=self.profile_id,
+        )
         states_by_id = {state.block_id: state for state in states}
         by_id = {block.block_id: block for block in blocks}
         child_ids_by_parent = self._catalog_child_ids(blocks)
@@ -1675,35 +1859,40 @@ class MemoryClient:
             return tuple(
                 dict.fromkeys(
                     edge.dst_id if edge.src_id == block_id else edge.src_id
-                    for edge in edges_by_block[block_id]
+                    for edge in edges_by_block.get(block_id, ())
                 )
             )
 
+        def expanded_view(block: MemoryBlock, path: tuple[str, ...]) -> dict[str, Any]:
+            payload = self._block_catalog_view(
+                block,
+                catalog.descriptor(block.block_id),
+                include_index_state=True,
+                path=path,
+                child_ids=child_ids_by_parent[block.block_id],
+                topology_state=states_by_id.get(block.block_id),
+                related_block_ids=related_for(block.block_id),
+                native_partitions=partitions_for(block.block_id),
+                block_metrics=metrics_for(block.block_id),
+            )
+            is_meta = block.block_id not in states_by_id
+            payload["meta"] = is_meta
+            payload["node_kind"] = "meta" if is_meta else "workspace"
+            if is_meta and block.block_id == "memory_root_index":
+                payload["description"] = (
+                    "Protected meta-node taxonomy for routing agent-authored memory."
+                )
+                payload["synopsis"] = (
+                    payload["description"]
+                    + f" Coverage: {payload['record_count']} canonical record(s)."
+                )
+            return payload
+
         return {
             "path_ids": list(path_ids),
-            "root": self._block_catalog_view(
-                selected,
-                catalog.descriptor(selected.block_id),
-                include_index_state=True,
-                path=path_ids,
-                child_ids=child_ids_by_parent[selected.block_id],
-                topology_state=states_by_id[selected.block_id],
-                related_block_ids=related_for(selected.block_id),
-                native_partitions=partitions_for(selected.block_id),
-                block_metrics=metrics_for(selected.block_id),
-            ),
+            "root": expanded_view(selected, path_ids),
             "children": [
-                self._block_catalog_view(
-                    child,
-                    catalog.descriptor(child.block_id),
-                    include_index_state=True,
-                    path=(*path_ids, child.block_id),
-                    child_ids=child_ids_by_parent[child.block_id],
-                    topology_state=states_by_id[child.block_id],
-                    related_block_ids=related_for(child.block_id),
-                    native_partitions=partitions_for(child.block_id),
-                    block_metrics=metrics_for(child.block_id),
-                )
+                expanded_view(child, (*path_ids, child.block_id))
                 for child in children
             ],
         }
@@ -1884,6 +2073,38 @@ class MemoryClient:
             expected_metadata=expected_metadata,
             reason=reason,
             profile_id=self.profile_id,
+        )
+
+    def convert_block_to_index(
+        self,
+        block_id: str,
+        *,
+        expected_revision: int,
+        reason: str,
+    ) -> dict[str, Any]:
+        """Convert an empty leaf into an index-only parent for nested topics."""
+
+        record_ids_for_blocks = getattr(self.backend, "record_ids_for_logical_blocks", None)
+        if not callable(record_ids_for_blocks):
+            raise ValueError("selected backend cannot prove that the block is empty")
+        historical_ids = record_ids_for_blocks(
+            (str(block_id or "").strip(),),
+            workspace_id=self.workspace_id,
+            profile_id=self.profile_id,
+            historical=True,
+        )
+        if historical_ids:
+            raise ValueError(
+                "convert_block_to_index requires a leaf that has never held records"
+            )
+        return convert_workspace_block_to_index(
+            self.repo_root,
+            self.workspace_id,
+            block_id,
+            expected_revision=expected_revision,
+            reason=reason,
+            profile_id=self.profile_id,
+            actor=self._topology_actor,
         )
 
     def archive_block(
@@ -2129,6 +2350,7 @@ class MemoryClient:
         *,
         expected_revision: int,
         reason: str,
+        cascade: bool = False,
     ) -> dict[str, Any]:
         store = WorkspaceCatalogStore(self.repo_root, self.workspace_id, self.profile_id)
         try:
@@ -2146,32 +2368,55 @@ class MemoryClient:
                 raise ValueError("hard delete requires no graph edges")
             if store.block_has_active_mask_reference(block_id):
                 raise ValueError("hard delete requires no active mask references")
-            record_ids_for_blocks = getattr(self.backend, "record_ids_for_logical_blocks", None)
-            get_block = getattr(self.backend, "get_block", None)
-            if not callable(record_ids_for_blocks) or not callable(get_block):
-                raise ValueError("hard delete cannot prove that the block has no current records")
-            current_records = [
-                record
-                for record_id in record_ids_for_blocks(
-                    (block_id,),
-                    workspace_id=self.workspace_id,
-                )
-                if isinstance(
-                    (record := get_block(record_id, workspace_id=self.workspace_id)),
-                    MemoryBlockRecord,
-                )
-                and record.profile_id == self.profile_id
-                and record.status not in {"superseded", "deprecated", "retracted", "expired"}
-            ]
+            current_records = self._current_records_in_block(block_id)
+            if current_records and not cascade:
+                return {
+                    "ok": True,
+                    "deleted": False,
+                    "archived": True,
+                    "records_remaining": len(current_records),
+                    "hint": (
+                        "The block is archived but still has current records. "
+                        "Call delete_block again with cascade=true to retract them "
+                        "and delete the block, or forget each record first."
+                    ),
+                }
             if current_records:
-                raise ValueError("hard delete requires no current records")
+                failures: list[dict[str, str]] = []
+                for record in current_records:
+                    try:
+                        self.forget(
+                            record.block_id,
+                            reason=f"cascade delete block: {reason}",
+                            expected_revision=record.revision_id,
+                        )
+                    except Exception as exc:  # pragma: no cover - backend dependent
+                        failures.append(
+                            {"record_id": record.block_id, "error": f"{type(exc).__name__}: {exc}"}
+                        )
+                current_records = self._current_records_in_block(block_id)
+                if current_records:
+                    return {
+                        "ok": False,
+                        "deleted": False,
+                        "archived": True,
+                        "records_remaining": len(current_records),
+                        "error": "cascade delete could not retract every current record",
+                        "cascade_failures": failures,
+                    }
             tombstone = store.delete_block(
                 state,
                 expected_revision=expected_revision,
                 actor=self._topology_actor,
                 reason=reason,
             )
-            return {"ok": True, "deleted": True, "tombstone": tombstone}
+            return {
+                "ok": True,
+                "deleted": True,
+                "archived": True,
+                "records_remaining": 0,
+                "tombstone": tombstone,
+            }
         finally:
             store.close()
 
@@ -6128,7 +6373,10 @@ class MemoryClient:
             edges_for=raw_edges_for if callable(raw_edges_for) else None,
         )
         if current.revision_id != expected:
-            raise ValueError("amend expected_revision does not match the current revision")
+            raise ValueError(
+                "amend expected_revision does not match the current revision "
+                f"{current.revision_id}"
+            )
         if (
             current.status == "accepted"
             or current.authority == "directive"
@@ -6275,6 +6523,7 @@ class MemoryClient:
             "old_id": current.block_id,
             "new_id": new_id,
             "memory_id": new_id,
+            "record_id": new_id,
             "old_revision": current.revision_id,
             "new_revision": decision.record.revision_id,
             "requested_block_id": selected_block_id,

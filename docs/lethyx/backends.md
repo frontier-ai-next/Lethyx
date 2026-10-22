@@ -117,6 +117,43 @@ retrieval operate only on the selected leaf collections. A pending or failed
 native projection is reported as such, rather than silently treated as an
 empty memory. Zvec's embedded index has no external server to start.
 
+## Semantic tier (optional)
+
+The backend decides how records are stored and searched. On top of it Lethyx
+can run one local retrieval tier that scores the newest records with
+multilingual sentence embeddings, so a question written in one script reaches
+a record written in another script. Install it with
+`python -m pip install "lethyx[semantic]"`; the default install never
+downloads a model.
+
+| Variable | Meaning |
+| --- | --- |
+| `LETHYX_SEMANTIC` | `0` switches the tier off. Default is on when the extra is installed. |
+| `LETHYX_SEMANTIC_MODEL` | Model id. Default `intfloat/multilingual-e5-large`. |
+| `LETHYX_SEMANTIC_CACHE_DIR` | Where the model files live. Default `<lethyx home>/cache/fastembed`. |
+| `LETHYX_SEMANTIC_FLOOR` | Minimum similarity that counts as a hit. Default is chosen per model. |
+| `LETHYX_SEMANTIC_WARMUP` | `0` defers the model load to the first question instead of warming it in the background at service start. |
+
+The tier runs in the local service, so the model is loaded once per service
+process and stays warm for the MCP tools and the pre-tool helper alike. It
+only reorders candidates: the stored record text remains the evidence, and a
+question with no real match returns nothing instead of a plausible-looking
+record. Prefetch the model with `lethyx semantic-model` instead of waiting
+for the first question.
+
+The model is a few gigabytes of resident memory, and it is only useful while
+a question is being scored. An unused model is released after
+`LETHYX_SEMANTIC_IDLE_SECONDS` (default 120 seconds) and loaded again on the
+next question. The native backend stays keyword-only, so no second model is
+ever loaded or downloaded; ask for native dense recall explicitly with
+`MNEMOSYNE_EMBEDDING_MODEL` if you want it.
+
+The index covers the whole workspace: every write joins it in the background and
+`lethyx semantic-index` backfills what is missing, so a question in any script
+reaches old records and not only the newest window. Stored procedures are
+records of kind `procedure`; `lethyx memory-map` renders the workspace as one
+self-contained HTML page for a human look.
+
 ## Switching backends
 
 Changing `LETHYX_BACKEND` does not move existing records. Start a separate

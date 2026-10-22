@@ -51,6 +51,7 @@ _LOCAL_SERVICE_MUTATION_TOOLS = frozenset(
         "amend",
         "promote",
         "create_block",
+        "convert_block_to_index",
         "amend_block",
         "move_block",
         "archive_block",
@@ -96,6 +97,8 @@ _LOCAL_SERVICE_ROLE_TOOLS: dict[str, frozenset[str]] = {
             "resolve_active_mask",
             "observe_maintenance",
             "recall",
+            "procedure",
+            "memory_map",
             "read_working_set",
             "read_exact_record",
             "read_exact_records",
@@ -137,7 +140,11 @@ _LOCAL_SERVICE_ROLE_TOOLS: dict[str, frozenset[str]] = {
             "resolve_active_mask",
             "observe_maintenance",
             "consolidate_observations",
+            "convert_block_to_index",
             "recall",
+            "procedure",
+            "memory_map",
+            "recent",
             "read_working_set",
             "read_exact_record",
             "read_exact_records",
@@ -182,9 +189,13 @@ _LOCAL_SERVICE_ROLE_TOOLS: dict[str, frozenset[str]] = {
             "resolve_active_mask",
             "observe_maintenance",
             "consolidate_observations",
+            "convert_block_to_index",
             "remember",
             "amend",
             "recall",
+            "procedure",
+            "memory_map",
+            "recent",
             "read_working_set",
             "read_exact_record",
             "read_exact_records",
@@ -297,7 +308,20 @@ def _resolve_repo_root(repo_root: str | Path | None) -> Path:
 def _resolve_workspace_id(workspace_id: str | None) -> str:
     if workspace_id is not None and not isinstance(workspace_id, str):
         raise ValueError("workspace_id must be a string")
-    raw = str(workspace_id or os.getenv("LETHYX_WORKSPACE") or "default").strip()
+    mode = os.getenv("LETHYX_WORKSPACE_MODE", "").strip().lower()
+    if workspace_id is None and mode in {"project", "auto"}:
+        # Opt-in project isolation: derive a stable workspace from the project
+        # root instead of sharing one workspace across every project. Explicit
+        # ``workspace_id`` arguments and the default mode are unchanged.
+        project_root = os.getenv("LETHYX_PROJECT_ROOT") or os.getcwd()
+        try:
+            resolved_root = str(Path(project_root).expanduser().resolve())
+        except OSError:  # pragma: no cover - platform dependent
+            resolved_root = str(project_root)
+        digest = hashlib.sha256(resolved_root.encode("utf-8")).hexdigest()[:12]
+        raw = f"project-{digest}"
+    else:
+        raw = str(workspace_id or os.getenv("LETHYX_WORKSPACE") or "default").strip()
     workspace = normalize_workspace_id(raw)
     if not workspace:
         raise ValueError("workspace_id is required")

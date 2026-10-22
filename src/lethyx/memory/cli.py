@@ -46,6 +46,10 @@ def main(argv: list[str] | None = None) -> int:
             "claude-status",
             "explain-recall",
             "profile-report",
+            "semantic-model",
+            "semantic-index",
+            "semantic-calibrate",
+            "memory-map",
         ],
     )
 
@@ -74,6 +78,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--include-candidates", action="store_true")
     parser.add_argument("--query", default="")
     parser.add_argument("--limit", type=int, default=8)
+    parser.add_argument("--output", default="")
     parser.add_argument("--max-tokens", type=int, default=2048)
     parser.add_argument("--logical-block-id", action="append", default=[])
     reconcile_group = parser.add_mutually_exclusive_group()
@@ -128,6 +133,201 @@ def main(argv: list[str] | None = None) -> int:
             close = getattr(backend, "close", None)
             if callable(close):
                 close()
+    elif args.command == "semantic-model":
+        from lethyx.memory import semantic
+
+        embedder = semantic.get_embedder(
+            cache_dir=semantic.default_cache_dir(repo),
+        )
+        if embedder is None:
+            payload = {
+                "ok": False,
+                "error": "fastembed is not installed",
+                "hint": 'python -m pip install "lethyx[semantic]"',
+            }
+        else:
+            vectors = embedder.embed(["lethyx semantic model check"], kind="query")
+            payload = {
+                "ok": bool(vectors),
+                "model": embedder.model,
+                "dimensions": len(vectors[0]) if vectors else 0,
+                "cache_dir": str(embedder.cache_dir),
+                "load_seconds": round(embedder.load_seconds, 2),
+            }
+    elif args.command == "semantic-index":
+        from lethyx.memory import semantic as semantic_tier
+        from lethyx.memory.mcp_facade import lethyx_block_map
+
+        embedder = semantic_tier.get_embedder(
+            cache_dir=semantic_tier.default_cache_dir(repo),
+        )
+        if embedder is None:
+            payload = {
+                "ok": False,
+                "error": "fastembed is not installed",
+                "hint": 'python -m pip install "lethyx[semantic]"',
+            }
+        else:
+            client = MemoryClient(
+                repo,
+                workspace_id=args.workspace,
+                profile_id=args.profile,
+                backend=args.backend,
+                session_id="semantic-index",
+            )
+            try:
+                index = semantic_tier.SemanticIndex(
+                    semantic_tier.semantic_index_path(repo, args.workspace)
+                )
+                tree = lethyx_block_map(
+                    workspace_id=args.workspace,
+                    repo_root=str(repo),
+                    backend=args.backend,
+                    depth=4,
+                )
+                leaves: list[dict[str, object]] = []
+
+                def collect(nodes: object) -> None:
+                    for node in nodes or []:
+                        if not isinstance(node, dict):
+                            continue
+                        children = node.get("children") or []
+                        if children:
+                            collect(children)
+                        elif not node.get("index_only"):
+                            leaves.append(node)
+
+                collect(tree.get("roots") or [])
+                indexed = 0
+                skipped = 0
+                for leaf in leaves:
+                    block_id = str(leaf.get("block_id") or "").strip()
+                    if not block_id:
+                        continue
+                    cursor = ""
+                    while True:
+                        page = client.list_records(
+                            scope="workspace",
+                            scope_id=args.workspace,
+                            logical_block_id=block_id,
+                            limit=128,
+                            cursor=cursor,
+                        )
+                        identifiers = [
+                            str(item.get("record_id") or "")
+                            for item in page.get("records") or []
+                            if str(item.get("record_id") or "")
+                        ]
+                        for start in range(0, len(identifiers), 128):
+                            for record in client.read_exact_records(
+                                identifiers[start : start + 128]
+                            ):
+                                if semantic_tier.embed_record(
+                                    index,
+                                    embedder,
+                                    profile=args.profile,
+                                    record_id=record.block_id,
+                                    title=record.title or "",
+                                    content=record.content or "",
+                                    kind=record.kind or "",
+                                ):
+                                    indexed += 1
+                                else:
+                                    skipped += 1
+                        cursor = str(page.get("next_cursor") or "")
+                        if not cursor:
+                            break
+                payload = {
+                    "ok": True,
+                    "model": embedder.model,
+                    "indexed": indexed,
+                    "skipped": skipped,
+                    "indexed_records": index.count(embedder.model, args.profile),
+                    "cache_dir": str(embedder.cache_dir),
+                }
+            finally:
+                close = getattr(client, "close", None)
+                if callable(close):
+                    close()
+    elif args.command == "semantic-calibrate":
+        from lethyx.memory import semantic as semantic_tier
+
+        embedder = semantic_tier.get_embedder(
+            cache_dir=semantic_tier.default_cache_dir(repo),
+        )
+        if embedder is None:
+            payload = {
+                "ok": False,
+                "error": "fastembed is not installed",
+                "hint": 'python -m pip install "lethyx[semantic]"',
+            }
+        else:
+            client = MemoryClient(
+                repo,
+                workspace_id=args.workspace,
+                profile_id=args.profile,
+                backend=args.backend,
+                session_id="semantic-calibrate",
+            )
+            try:
+                records = client.recent_records(
+                    limit=128,
+                    scope="workspace",
+                    scope_id=args.workspace,
+                    include_candidates=True,
+                )
+                window = [
+                    {
+                        "record_id": str(record.block_id or ""),
+                        "title": str(record.title or ""),
+                        "content": str(record.content or ""),
+                    }
+                    for record in records
+                ]
+                index = semantic_tier.SemanticIndex(
+                    semantic_tier.semantic_index_path(repo, args.workspace)
+                )
+                measured = semantic_tier.calibrate(
+                    window, index, embedder, profile=args.profile
+                )
+                if measured.get("ok"):
+                    semantic_tier.store_calibration(
+                        repo, args.workspace, measured
+                    )
+                payload = measured
+            finally:
+                close = getattr(client, "close", None)
+                if callable(close):
+                    close()
+    elif args.command == "memory-map":
+        from lethyx.memory.memory_map import (
+            collect_memory_map,
+            memory_map_summary,
+            write_memory_map,
+        )
+
+        target = str(args.output or "").strip()
+        if not target:
+            target = str(Path(repo) / "memory-map.html")
+        written = write_memory_map(
+            repo,
+            target,
+            workspace_id=args.workspace,
+            profile_id=args.profile,
+            backend=args.backend,
+        )
+        payload = {
+            "ok": True,
+            "path": str(written),
+            "summary": memory_map_summary(
+                collect_memory_map(
+                    repo,
+                    workspace_id=args.workspace,
+                    profile_id=args.profile,
+                    backend=args.backend,
+                )
+            ),
+        }
     elif args.command == "hermes-provider-install":
         from lethyx.integrations.hermes_provider import _home, install_hermes_provider
 

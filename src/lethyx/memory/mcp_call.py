@@ -64,6 +64,7 @@ from lethyx.memory.mcp_facade import (
     lethyx_build_granted_context,
     lethyx_commit_working_checkpoint,
     lethyx_consolidate_observations,
+    lethyx_convert_block_to_index,
     lethyx_create_block,
     lethyx_delete_block,
     lethyx_expand_block,
@@ -80,6 +81,8 @@ from lethyx.memory.mcp_facade import (
     lethyx_list_records,
     lethyx_navigation_envelope,
     lethyx_observe,
+    lethyx_memory_map,
+    lethyx_procedure,
     lethyx_observe_maintenance,
     lethyx_promote,
     lethyx_read_working_set,
@@ -88,6 +91,7 @@ from lethyx.memory.mcp_facade import (
     lethyx_operation_status,
     lethyx_projection_barrier,
     lethyx_recall,
+    lethyx_recent,
     lethyx_remember,
     lethyx_remove_block_edge,
     lethyx_resolve_active_mask,
@@ -150,6 +154,7 @@ TOOLS: dict[str, Callable[..., dict[str, Any]]] = {
     "expand_block": lethyx_expand_block,
     "navigation_envelope": lethyx_navigation_envelope,
     "create_block": lethyx_create_block,
+    "convert_block_to_index": lethyx_convert_block_to_index,
     "amend_block": lethyx_amend_block,
     "move_block": lethyx_move_block,
     "archive_block": lethyx_archive_block,
@@ -172,6 +177,9 @@ TOOLS: dict[str, Callable[..., dict[str, Any]]] = {
     "remember": lethyx_remember,
     "amend": lethyx_amend,
     "recall": lethyx_recall,
+    "procedure": lethyx_procedure,
+    "memory_map": lethyx_memory_map,
+    "recent": lethyx_recent,
     "read_working_set": lethyx_read_working_set,
     "read_exact_record": lethyx_read_exact_record,
     "read_exact_records": lethyx_read_exact_records,
@@ -749,6 +757,18 @@ def _compact_remember_receipt(payload: dict[str, object]) -> dict[str, object]:
             "backend": payload.get("backend"),
             "workspace_id": payload.get("workspace_id"),
         }
+        route_decision = payload.get("route_decision")
+        if route_decision is not None:
+            if not isinstance(route_decision, dict):
+                raise ValueError("local service routed receipt response invalid")
+            response["route_decision"] = dict(route_decision)
+        policy_issues = payload.get("policy_issues")
+        if policy_issues is not None:
+            if not isinstance(policy_issues, list) or any(
+                not isinstance(issue, str) or not issue for issue in policy_issues
+            ):
+                raise ValueError("local service routed receipt response invalid")
+            response["policy_issues"] = list(policy_issues)
         suggested_route = payload.get("suggested_route")
         if suggested_route is not None:
             if (
@@ -764,7 +784,15 @@ def _compact_remember_receipt(payload: dict[str, object]) -> dict[str, object]:
         if any(
             not isinstance(value, str) or not value
             for key, value in response.items()
-            if key not in {"ok", "saved", "route_rejected", "suggested_route"}
+            if key
+            not in {
+                "ok",
+                "saved",
+                "route_rejected",
+                "route_decision",
+                "policy_issues",
+                "suggested_route",
+            }
         ):
             raise ValueError("local service routed receipt response invalid")
         return response
@@ -2183,6 +2211,65 @@ def _listener_lifecycle_monitor(
             return
 
 
+def _reap_idle_model() -> None:
+    """Release an embedding model that nobody used for a while.
+
+    The model is a few gigabytes of resident memory and is only useful while a
+    question is being scored. A long-lived service keeps it loaded only
+    between the questions that need it.
+    """
+
+    from lethyx.memory import semantic as semantic_tier
+
+    while True:
+        time.sleep(15)
+        idle = semantic_tier.idle_release_seconds()
+        if idle <= 0:
+            continue
+        for embedder in semantic_tier.known_embedders():
+            try:
+                embedder.release_if_idle(idle)
+            except Exception:  # pragma: no cover - best effort
+                continue
+
+
+def _warm_local_tier(identity: Any) -> None:
+    """Load the embedding model in the background for this listener.
+
+    The local retrieval tier runs inside the listener, so the model is loaded
+    once per listener instead of once per call. Loading it in the background
+    keeps the first question from paying the whole cost.
+    """
+
+    def warm() -> None:
+        from lethyx.memory import semantic as semantic_tier
+
+        if not semantic_tier.semantic_enabled():
+            return
+        if not semantic_tier.semantic_warmup_enabled():
+            return
+        embedder = semantic_tier.get_embedder(
+            cache_dir=semantic_tier.default_cache_dir(identity.repo_root)
+        )
+        if embedder is None:
+            return
+        try:
+            embedder.embed(["lethyx listener warmup"], kind="query")
+        except Exception:  # pragma: no cover - optional dependency
+            return
+
+    threading.Thread(
+        target=warm,
+        name="lethyx-local-tier-warmup",
+        daemon=True,
+    ).start()
+    threading.Thread(
+        target=_reap_idle_model,
+        name="lethyx-local-tier-reaper",
+        daemon=True,
+    ).start()
+
+
 def _run_local_service_listener(args: list[str]) -> int:
     try:
         identity, owner_pid = _local_listener_configuration(args)
@@ -2195,6 +2282,7 @@ def _run_local_service_listener(args: list[str]) -> int:
             profile_id=identity.profile_id,
             backend=identity.backend,
         ) as client:
+            _warm_local_tier(identity)
             runtime = _LocalServiceListenerRuntime(identity, client)
             server = _LocalServiceListenerServer(
                 (LOCAL_SERVICE_LISTENER_HOST, 0),

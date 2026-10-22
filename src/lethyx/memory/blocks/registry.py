@@ -439,6 +439,82 @@ def amend_workspace_block(
         store.close()
 
 
+def convert_workspace_block_to_index(
+    repo_root: str | Path,
+    workspace_id: str,
+    block_id: str,
+    *,
+    expected_revision: int,
+    reason: str,
+    profile_id: str = "default",
+    actor: str = "llm",
+) -> dict[str, Any]:
+    """Turn an empty leaf into an index-only parent so it can hold children.
+
+    Conversion is deliberately limited to blocks that have never held records.
+    The caller proves that separately against the selected backend; this function
+    keeps the catalog mutation atomic and clears the now-unused partition id.
+    """
+
+    identifier = str(block_id or "").strip()
+    mutation_reason = str(reason or "").strip()
+    if not identifier or type(expected_revision) is not int or not mutation_reason:
+        raise ValueError("convert_block_to_index requires block_id, integer expected_revision, and reason")
+    store = WorkspaceCatalogStore(repo_root, workspace_id, profile_id)
+    try:
+        state = store.get_block(identifier)
+        if state is None:
+            raise ValueError(f"dynamic memory block {identifier!r} was not found in this profile")
+        if state.protected:
+            raise ValueError("protected root cannot be converted to an index block")
+        if state.status != "active":
+            raise ValueError("only an active leaf can be converted to an index block")
+        if state.block.index_only:
+            return {
+                "ok": True,
+                "saved": False,
+                "already_index_only": True,
+                "block_id": identifier,
+                "revision": state.revision,
+                "catalog_revision": store.catalog_revision(),
+                "block": asdict(state.block),
+            }
+        if state.block.child_ids:
+            raise ValueError("a block with children cannot be converted to an index block")
+        updated = replace(
+            state.block,
+            block_type="workspace_dynamic_index",
+            index_only=True,
+            agent_writable=False,
+        )
+        active_without_current = [
+            item.block for item in store.list_blocks() if item.block_id != identifier
+        ]
+        candidate = [*active_without_current, updated]
+        validate_memory_block_tree(candidate)
+        validate_leaf_block_contracts(candidate)
+        converted = store.replace_block(
+            state,
+            updated,
+            expected_revision=expected_revision,
+            status="active",
+            actor=actor,
+            reason=mutation_reason,
+            operation="convert_block_to_index",
+            backend_partition_id="",
+        )
+        return {
+            "ok": True,
+            "saved": True,
+            "previous_revision": state.revision,
+            **converted.to_mapping(),
+            "catalog_revision": store.catalog_revision(),
+            "block": asdict(updated),
+        }
+    finally:
+        store.close()
+
+
 def repair_protected_workspace_block_parent(
     repo_root: str | Path,
     workspace_id: str,

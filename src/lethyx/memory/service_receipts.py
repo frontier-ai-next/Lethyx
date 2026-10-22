@@ -436,10 +436,8 @@ def _decode_response(raw: str) -> dict[str, object]:
         "workspace_id": str,
     }
     rejected_keys = set(response)
-    if rejected_keys in (
-        set(rejected_required),
-        {*rejected_required, "suggested_route"},
-    ):
+    rejected_optional = {"suggested_route", "route_decision", "policy_issues"}
+    if set(rejected_required) <= rejected_keys <= set(rejected_required) | rejected_optional:
         if any(
             not isinstance(response.get(key), value_type)
             for key, value_type in rejected_required.items()
@@ -450,6 +448,15 @@ def _decode_response(raw: str) -> dict[str, object]:
             or response["saved"] is not False
             or response["route_rejected"] is not True
             or not response["reason"]
+        ):
+            raise RuntimeError("local service remember receipt response invalid")
+        route_decision = response.get("route_decision")
+        if route_decision is not None and not isinstance(route_decision, dict):
+            raise RuntimeError("local service remember receipt response invalid")
+        policy_issues = response.get("policy_issues")
+        if policy_issues is not None and (
+            not isinstance(policy_issues, list)
+            or any(not isinstance(issue, str) or not issue for issue in policy_issues)
         ):
             raise RuntimeError("local service remember receipt response invalid")
         suggested_route = response.get("suggested_route")

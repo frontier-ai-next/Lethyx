@@ -33,6 +33,7 @@ dev = [
 ]
 hindsight = ["hindsight-client>=0.8.3,<0.9"]
 hindsight-local = ["hindsight-all>=0.8.3,<0.9", "litellm==1.90.0"]
+semantic = ["fastembed>=0.9,<0.10"]
 zvec = ["zvec>=0.7,<0.8"]
 openai = ["openai>=2.43.0"]
 mcp = ["mcp>=1.20.0,<2", "ruamel.yaml>=0.18,<1", "tomlkit>=0.13,<1"]

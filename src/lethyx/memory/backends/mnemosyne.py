@@ -75,6 +75,27 @@ _LOG = logging.getLogger(__name__)
 
 _NATIVE_IMPORT_LOCK = threading.RLock()
 MNEMOSYNE_PARTITION_PROJECTION_MARKER = "mnemosyne_session_partition_v2"
+#: Mnemosyne supplements its own recall with MEMORIA rows. One of them is a
+#: context string and the others are duplicate views of working-memory rows.
+#: They are extraction artifacts without a canonical Lethyx identity, so they
+#: are never hydrated as evidence.
+MNEMOSYNE_MEMORIA_TIERS = frozenset({"memoria", "memoria_source"})
+
+
+def _configure_native_embeddings(repo_root: Path | None = None) -> None:
+    """Keep the native backend from loading a second embedding model.
+
+    The local retrieval tier owns the semantic path. Mnemosyne would otherwise
+    load a model of its own for dense recall, which means a second copy in
+    resident memory and a second download on a fresh machine. The native side
+    therefore stays keyword-only unless an operator asks for native dense
+    recall explicitly with ``MNEMOSYNE_EMBEDDING_MODEL``.
+    """
+
+    if "MNEMOSYNE_EMBEDDING_MODEL" in os.environ:
+        # The operator asked for native dense recall: respect that choice.
+        return
+    os.environ.setdefault("MNEMOSYNE_NO_EMBEDDINGS", "1")
 
 
 def _enabled() -> bool:
@@ -151,6 +172,9 @@ class MnemosyneBackend:
             previous = os.environ.get("MNEMOSYNE_DATA_DIR")
             os.environ["MNEMOSYNE_DATA_DIR"] = str(partition_dir)
             try:
+                # The embedding defaults have to be in place before Mnemosyne
+                # reads them at import time.
+                _configure_native_embeddings(self.repo_root)
                 from mnemosyne import Mnemosyne  # type: ignore[import-untyped]
 
                 return Mnemosyne(
@@ -1336,19 +1360,38 @@ class MnemosyneBackend:
                     profile_id=str(payload.get("profile_id") or ""),
                 )
             pool: list[tuple[MemoryBlockRecord, float | None]] = []
+            pool_index: dict[str, int] = {}
             for row in rows:
                 summary = dict(row) if isinstance(row, dict) else {}
                 native_id = str(summary.get("id") or "")
                 if not native_id:
                     raise ValueError("mnemosyne native recall row has no memory id")
+                memoria = (
+                    str(summary.get("tier") or "") in MNEMOSYNE_MEMORIA_TIERS
+                    or native_id.startswith("memoria_")
+                )
+                if memoria:
+                    # Mnemosyne supplements its own recall with MEMORIA rows: a
+                    # context string and duplicate views of working-memory
+                    # rows. They are extraction artifacts, not Lethyx records,
+                    # so they are never hydrated as evidence. A duplicate view
+                    # points at the row it mirrors.
+                    mirrored = str(summary.get("source_memory_id") or "")
+                    if not mirrored:
+                        continue
+                    native_id = mirrored
                 detail = get_memory(native_id)
                 if not isinstance(detail, dict):
+                    if memoria:
+                        continue
                     raise ValueError("mnemosyne native recall detail is missing")
                 hydrated = dict(detail)
                 if "score" in summary:
                     hydrated["score"] = summary["score"]
                 native_record = self._native_row_to_block(hydrated)
                 if native_primary_block_id(native_record) != logical_block_id:
+                    if memoria:
+                        continue
                     raise ValueError("mnemosyne native scoped row escaped its primary block")
                 record = self._overlay_native_sidecar_contract(native_record, payload)
                 if record is None:
@@ -1362,7 +1405,14 @@ class MnemosyneBackend:
                     score = float(raw_score) if raw_score is not None else None
                 except (TypeError, ValueError) as exc:
                     raise ValueError("mnemosyne native score is invalid") from exc
-                pool.append((record, score))
+                position = pool_index.get(native_id)
+                if position is None:
+                    pool.append((record, score))
+                    pool_index[native_id] = len(pool) - 1
+                elif score is not None and (
+                    pool[position][1] is None or score > float(pool[position][1] or 0.0)
+                ):
+                    pool[position] = (record, score)
             pools.append((logical_block_id, pool))
         return merge_native_block_results(pools, limit=limit, score_mode="partition_rank")
 

@@ -8,6 +8,7 @@ Hermes will expose these tools as `mcp_<server_name>_<tool_name>`.
 """
 
 import os
+import threading
 from pathlib import Path
 from typing import Annotated, Any
 from uuid import uuid4
@@ -16,6 +17,9 @@ from mcp.server.fastmcp import FastMCP
 from pydantic import Field
 
 from lethyx.contracts.memory import MemoryScope
+from lethyx.memory import local_tier
+from lethyx.memory import semantic as semantic_tier
+from lethyx.memory import text as universal_text
 from lethyx.memory.topology_schema import BLOCK_EVOLUTION_TARGET_SCHEMA, BLOCK_MERGE_SOURCE_SCHEMA
 from lethyx.memory.local_service import (
     LocalServiceClientPool,
@@ -58,6 +62,9 @@ TOOL_NAMES = (
     "remember",
     "amend",
     "recall",
+    "procedure",
+    "memory_map",
+    "recent",
     "read_exact_record",
     "read_exact_records",
     "list_records",
@@ -144,6 +151,345 @@ def _export_path_is_authorized(identity, arguments: dict[str, Any]) -> bool:
         return False
 
 
+#: How many newest records the universal lexical fallback scores locally.
+#: The fallback is bounded so a miss stays cheap; the native backend remains
+#: the primary retriever for large stores.
+_FALLBACK_SCAN_LIMIT = 128
+#: How many newest records to surface when even the fallback finds nothing.
+_FALLBACK_RECENT_LIMIT = 3
+
+
+def _service_call(identity, scope_lineage, name: str, arguments: dict[str, Any]) -> dict[str, Any]:
+    """Call the shared listener without the MCP projection layer."""
+
+    return _LOCAL_SERVICE_CLIENTS.call(
+        identity,
+        name,
+        arguments,
+        timeout_seconds=_tool_timeout(),
+        session_id=scope_lineage.session_id,
+        scope_lineage=scope_lineage,
+        mutation_correlation_id=(
+            arguments.get("operation_id", "") if name == "remember" else ""
+        ),
+    )
+
+
+def _relax_terms(query: str, limit: int = 6) -> list[str]:
+    """Return query terms using universal Unicode tokenization."""
+
+    return universal_text.distinctive_terms(query, limit=limit)
+
+
+def _hit_record_id(hit: Any) -> str:
+    return local_tier.hit_record_id(hit)
+
+
+def _merge_hits(groups: list[Any], limit: int) -> list[dict[str, Any]]:
+    return local_tier.merge_hits(groups, limit)
+
+
+def _record_source_speakers(record: dict[str, Any]) -> set[str]:
+    return local_tier.record_source_speakers(record)
+
+
+def _fallback_record_allowed(record: dict[str, Any], arguments: dict[str, Any]) -> bool:
+    """Apply the caller's explicit filters to the bounded fallback window."""
+
+    return local_tier.record_allowed(record, arguments)
+
+
+def _fallback_records(
+    identity, scope_lineage, arguments: dict[str, Any] | None = None
+) -> list[dict[str, Any]]:
+    """Fetch a bounded newest-first record window for local scoring."""
+
+    try:
+        payload = _service_call(
+            identity,
+            scope_lineage,
+            "recent",
+            {"limit": local_tier.FALLBACK_SCAN_LIMIT, "include_candidates": True},
+        )
+    except Exception:  # pragma: no cover - advisory fallback
+        return []
+    if not isinstance(payload, dict) or not payload.get("ok"):
+        return []
+    selected = arguments or {}
+    return [
+        record
+        for record in payload.get("records") or []
+        if isinstance(record, dict) and _fallback_record_allowed(record, selected)
+    ]
+
+
+def _fallback_hit(record: dict[str, Any], score: float) -> dict[str, Any]:
+    return local_tier.fallback_hit(record, score)
+
+
+def _semantic_relaxed(
+    identity, records: list[dict[str, Any]], query: str, limit: int
+) -> dict[str, Any]:
+    """Score the same window with local multilingual sentence embeddings."""
+
+    return local_tier.semantic_relaxed(
+        records,
+        query,
+        limit,
+        getattr(identity, "repo_root", ""),
+        str(getattr(identity, "workspace_id", "") or "default"),
+    )
+
+
+def _relaxed_recall(
+    identity, scope_lineage, arguments: dict[str, Any], limit: int
+) -> dict[str, Any]:
+    """Score a bounded record window with every local tier."""
+
+    query = str(arguments.get("query") or "")
+    records = _fallback_records(identity, scope_lineage, arguments)
+    return local_tier.relaxed_recall(
+        records,
+        query,
+        limit,
+        getattr(identity, "repo_root", ""),
+        str(getattr(identity, "workspace_id", "") or "default"),
+    )
+
+
+def _fallback_scope_allows(arguments: dict[str, Any]) -> bool:
+    """Use the local window only when it can honestly answer the same query."""
+
+    return local_tier.scope_allows(arguments)
+
+
+def _merge_context_items(
+    existing: list[dict[str, Any]],
+    fallback: list[dict[str, Any]],
+    limit: int,
+) -> list[dict[str, Any]]:
+    return local_tier.merge_context_items(existing, fallback, limit)
+
+
+def _merge_tiered(
+    primary: list[dict[str, Any]],
+    secondary: list[dict[str, Any]],
+    limit: int,
+) -> list[dict[str, Any]]:
+    return local_tier.merge_tiered(primary, secondary, limit)
+
+
+def _apply_recall_fallback(
+    identity,
+    scope_lineage,
+    name: str,
+    arguments: dict[str, Any],
+    result: dict[str, Any],
+) -> dict[str, Any]:
+    """Repair an empty, weak or failed retrieval with the local window.
+
+    The shared service already applies the tier for every tool call, so this
+    is the safety net for a host that reaches the tools without it. The
+    service marks the result, and the tier is never applied twice.
+    """
+
+    if isinstance(result, dict) and (
+        result.get("_local_tier_applied") or result.get("relaxed_tried")
+    ):
+        return result
+    return local_tier.apply_local_tier(
+        result,
+        name=name,
+        arguments=arguments,
+        records_provider=lambda: _fallback_records(identity, scope_lineage, arguments),
+        repo_root=getattr(identity, "repo_root", ""),
+        workspace_id=str(getattr(identity, "workspace_id", "") or "default"),
+    )
+
+
+def _similar_records(
+    identity, scope_lineage, content: str, title: str, exclude_id: str
+) -> list[dict[str, Any]]:
+    """Look for near-duplicates of a freshly written record.
+
+    Exact content is not the only duplicate shape: a re-worded restatement or a
+    reused title is just as common. Semantic scores alone miss those on native
+    lexical backends, so this adds a script-neutral n-gram signal and an exact
+    title check.
+    """
+
+    query = " ".join(
+        part
+        for part in (str(title or "").strip(), str(content or "").strip()[:300])
+        if part
+    ).strip()
+    if not query:
+        return []
+    try:
+        payload = _service_call(
+            identity,
+            scope_lineage,
+            "recall",
+            {"query": query, "limit": 5, "include_candidates": True, "search_all": True},
+        )
+    except Exception:  # pragma: no cover - advisory check
+        return []
+    if not isinstance(payload, dict) or not payload.get("ok"):
+        return []
+    normalized_content = universal_text.normalize(content)
+    normalized_title = universal_text.normalize(title)
+    similar: list[dict[str, Any]] = []
+    for hit in payload.get("hits") or []:
+        if not isinstance(hit, dict):
+            continue
+        record_id = _hit_record_id(hit)
+        if not record_id or record_id == exclude_id:
+            continue
+        text = str(hit.get("text") or "")
+        exact = (
+            bool(normalized_content)
+            and universal_text.normalize(text) == normalized_content
+        )
+        lexical = universal_text.similarity(text, content)
+        title_match = (
+            bool(normalized_title)
+            and universal_text.normalize(str(hit.get("title") or ""))
+            == normalized_title
+        )
+        try:
+            score = float(hit.get("score") or 0.0)
+        except (TypeError, ValueError):
+            score = 0.0
+        if not (exact or title_match or lexical >= 0.45 or score >= 0.5):
+            continue
+        similar.append(
+            {
+                "record_id": record_id,
+                "title": str(hit.get("title") or ""),
+                "score": round(
+                    1.0 if exact else (0.9 if title_match else max(score, lexical)), 3
+                ),
+                "lexical": round(lexical, 3),
+                "exact": exact,
+                "title_match": title_match,
+                "text": text[:200],
+            }
+        )
+        if len(similar) >= 3:
+            break
+    return similar
+
+
+def _auto_index_parent(identity, scope_lineage, arguments: dict[str, Any], result: dict[str, Any]) -> dict[str, Any]:
+    """Convert an empty leaf parent to an index block, then retry creation."""
+
+    parent_id = str(arguments.get("parent_id") or "").strip()
+    if not parent_id:
+        return result
+    try:
+        expanded = _service_call(identity, scope_lineage, "expand_block", {"block_id": parent_id})
+    except Exception:  # pragma: no cover - advisory repair
+        expanded = {}
+    root = expanded.get("root") if isinstance(expanded, dict) else None
+    if not isinstance(root, dict):
+        result["hint"] = (
+            "The parent block could not be inspected; choose an index-only parent from block_map."
+        )
+        return result
+    record_count = root.get("record_count")
+    if root.get("index_only") or root.get("status") != "active":
+        result["hint"] = "Choose an active index-only parent from block_map."
+        return result
+    if record_count not in (0, None):
+        result["parent_record_count"] = record_count
+        result["hint"] = (
+            "The parent is a leaf that already holds records, so it cannot become an index "
+            "block. Create an index-only block under an index-only ancestor (see block_map) and "
+            "use that as parent_id."
+        )
+        return result
+    try:
+        converted = _service_call(
+            identity,
+            scope_lineage,
+            "convert_block_to_index",
+            {
+                "block_id": parent_id,
+                "expected_revision": int(root.get("revision") or 0),
+                "reason": "auto index parent for nested create_block",
+            },
+        )
+    except Exception:  # pragma: no cover - advisory repair
+        converted = {}
+    if not isinstance(converted, dict) or not converted.get("ok"):
+        result["auto_index_parent_error"] = (
+            converted.get("error") if isinstance(converted, dict) else "conversion failed"
+        )
+        result.setdefault(
+            "hint", "The parent leaf could not be converted; choose an index-only parent from block_map."
+        )
+        return result
+    try:
+        retry = _service_call(identity, scope_lineage, "create_block", arguments)
+    except Exception:  # pragma: no cover - advisory repair
+        return result
+    if isinstance(retry, dict) and retry.get("ok"):
+        retry["auto_index_parent"] = True
+        return retry
+    if isinstance(retry, dict):
+        retry.setdefault("hint", "Auto-converted the parent leaf, but creation still failed.")
+        return retry
+    return result
+
+
+def _auto_archive_delete(identity, scope_lineage, arguments: dict[str, Any], result: dict[str, Any]) -> dict[str, Any]:
+    """Archive a block and retry an idempotent hard delete in one call."""
+
+    reason = str(arguments.get("reason") or "delete")
+    try:
+        archive = _service_call(
+            identity,
+            scope_lineage,
+            "archive_block",
+            {
+                "block_id": arguments.get("block_id"),
+                "expected_revision": arguments.get("expected_revision"),
+                "reason": f"auto-archive before delete: {reason}",
+            },
+        )
+    except Exception:  # pragma: no cover - advisory repair
+        archive = {}
+    if not isinstance(archive, dict) or not archive.get("ok"):
+        result["auto_archive_error"] = (
+            archive.get("error") if isinstance(archive, dict) else "archive failed"
+        )
+        return result
+    revision = archive.get("revision")
+    if revision is None and isinstance(archive.get("block"), dict):
+        revision = archive["block"].get("revision")
+    if revision is None:
+        result["auto_archive_error"] = "archived but revision unavailable"
+        return result
+    try:
+        retry = _service_call(
+            identity,
+            scope_lineage,
+            "delete_block",
+            {
+                "block_id": arguments.get("block_id"),
+                "expected_revision": revision,
+                "reason": reason,
+                "cascade": bool(arguments.get("cascade")),
+            },
+        )
+    except Exception:  # pragma: no cover - advisory repair
+        retry = {}
+    if isinstance(retry, dict):
+        retry["auto_archived"] = True
+        return retry
+    return result
+
+
 def _call_tool(name: str, arguments: dict[str, Any]) -> dict[str, Any]:
     """Execute a Lethyx tool through its identity-bound shared listener."""
 
@@ -200,17 +546,7 @@ def _call_tool(name: str, arguments: dict[str, Any]) -> dict[str, Any]:
     except ValueError:
         return {"ok": False, "error": "local service scope lineage rejected"}
     try:
-        result = _LOCAL_SERVICE_CLIENTS.call(
-            identity,
-            name,
-            arguments,
-            timeout_seconds=_tool_timeout(),
-            session_id=scope_lineage.session_id,
-            scope_lineage=scope_lineage,
-            mutation_correlation_id=(
-                arguments.get("operation_id", "") if name == "remember" else ""
-            ),
-        )
+        result = _service_call(identity, scope_lineage, name, arguments)
         if name == "remember":
             result.setdefault("operation_id", arguments["operation_id"])
         if name == "health":
@@ -229,6 +565,43 @@ def _call_tool(name: str, arguments: dict[str, Any]) -> dict[str, Any]:
             result["service"] = service
         if name in {"remember", "amend", "forget"} and result.get("ok"):
             result = _await_projection(result, identity, scope_lineage)
+        if name == "create_block" and not result.get("ok"):
+            error = str(result.get("error") or "")
+            if "index-only parent" in error:
+                result = _auto_index_parent(identity, scope_lineage, arguments, result)
+        if name == "delete_block" and not result.get("ok"):
+            error = str(result.get("error") or "")
+            if "requires an archived block" in error:
+                result = _auto_archive_delete(identity, scope_lineage, arguments, result)
+        if name in {"recall", "build_context"} and not result.get("ok"):
+            error = str(result.get("error") or "")
+            if "hybrid retrieval is supported only by" in error:
+                result["hint"] = (
+                    "The selected backend has no dense index. Use retrieval_mode='semantic' "
+                    "(the default) or choose MemPalace/Zvec for hybrid retrieval."
+                )
+                result["supported_retrieval_modes"] = ["semantic"]
+        if name in {"recall", "build_context"}:
+            result = _apply_recall_fallback(
+                identity, scope_lineage, name, arguments, result
+            )
+        if (
+            name == "remember"
+            and result.get("ok")
+            and str(arguments.get("operation") or "add") == "add"
+            and os.getenv("LETHYX_MCP_DUPLICATE_CHECK", "1").strip().lower()
+            not in {"0", "false", "off", "no"}
+        ):
+            similar = _similar_records(
+                identity,
+                scope_lineage,
+                str(arguments.get("content") or ""),
+                str(arguments.get("title") or ""),
+                str(result.get("memory_id") or ""),
+            )
+            if similar:
+                result["similar_records"] = similar
+                result["duplicate_warning"] = True
         return compact_response(name, result)
     except ValueError:
         return {"ok": False, "error": "local service identity rejected"}
@@ -251,8 +624,20 @@ _COMPACT_INSTRUCTIONS = (
     "an empty active mask does not mean the passive tree is empty. "
     "`recall` and `build_context` search every block automatically when you pass no block ids; "
     "pass `logical_block_ids` when the subject is already known. "
+    "Retrieval is script-neutral: when native recall fails or has no useful hit, both score "
+    "the newest records with Unicode n-grams (`relaxed: true`, `fallback: \"unicode_ngram\"`), "
+    "so Cyrillic, CJK, and inflected queries are not silently dropped; `relaxed_tried: true` "
+    "means the fallback ran even if it found nothing, `recent_fallback` lists the newest "
+    "records, and a recovered backend failure keeps `degraded: true` and `backend_error`. "
+    "For continuity questions (\"what did we do last\") call `recent` directly. "
+    "`remember` reports `similar_records` when a near-duplicate already exists. "
     "Writes need a leaf: inspect `block_map`/`expand_block`, then `remember` into the leaf whose "
-    "meaning fits. Records stay candidates but are readable by default; publishing is a "
+    "meaning fits. `block_map(include_meta=true)` also exposes the protected meta-node taxonomy; "
+    "`expand_block` works on those standard categories, so a suggested route is always "
+    "inspectable. If an archived block still has records, `delete_block` returns "
+    "`records_remaining` and accepts `cascade=true` to retract them. Compact `amend` exposes the "
+    "new record as `record_id`/`new_id`; exact reads expose `record_id` and `logical_block_id`. "
+    "Records stay candidates but are readable by default; publishing is a "
     "supervisor operation outside this surface. "
     "Prefer one fitting leaf and sparse, self-contained records over conversation buckets. "
     "Cite only what the retrieved text supports; if evidence is missing, say so instead of "
@@ -262,12 +647,15 @@ _COMPACT_INSTRUCTIONS = (
 
 
 def _server_instructions() -> str:
-    mode = os.getenv("LETHYX_MCP_INSTRUCTIONS", "compact").strip().lower()
+    # Default to the canonical read/write guidance so the MCP, Python and
+    # Hermes surfaces stay identical. Token-sensitive deployments opt into
+    # the shorter routing text with LETHYX_MCP_INSTRUCTIONS=compact.
+    mode = os.getenv("LETHYX_MCP_INSTRUCTIONS", "full").strip().lower()
     if mode in {"off", "none", "empty"}:
         return ""
-    if mode == "full":
-        return MEMORY_READ_GUIDANCE + " " + MEMORY_WRITE_GUIDANCE
-    return _COMPACT_INSTRUCTIONS
+    if mode == "compact":
+        return _COMPACT_INSTRUCTIONS
+    return MEMORY_READ_GUIDANCE + " " + MEMORY_WRITE_GUIDANCE
 
 
 def create_mcp_server() -> FastMCP:
@@ -282,10 +670,16 @@ def create_mcp_server() -> FastMCP:
         return _call_tool("health", {})
 
     @server.tool()
-    def block_map() -> dict[str, Any]:
-        """Show the small root map without exposing memory record contents."""
+    def block_map(depth: int = 1, include_meta: bool = False) -> dict[str, Any]:
+        """Show the root map; depth=2 adds child synopses in one call.
 
-        return _call_tool("block_map", {})
+        Pass include_meta=true to also show the protected meta-node taxonomy,
+        which is a valid routing surface for standard memory categories.
+        """
+
+        return _call_tool(
+            "block_map", {"depth": depth, "include_meta": include_meta}
+        )
 
     @server.tool()
     def expand_block(block_id: str) -> dict[str, Any]:
@@ -413,13 +807,22 @@ def create_mcp_server() -> FastMCP:
         block_id: str,
         expected_revision: int,
         reason: str,
+        cascade: bool = False,
     ) -> dict[str, Any]:
+        """Hard-delete one archived block.
+
+        Without cascade, a block that still has current records is left in
+        place with records_remaining and an instruction to use cascade=true or
+        forget the records first.
+        """
+
         return _call_tool(
             "delete_block",
             {
                 "block_id": block_id,
                 "expected_revision": expected_revision,
                 "reason": reason,
+                "cascade": cascade,
             },
         )
 
@@ -803,6 +1206,64 @@ def create_mcp_server() -> FastMCP:
         )
 
     @server.tool()
+    def procedure(
+        query: str,
+        limit: int = 3,
+    ) -> dict[str, Any]:
+        """Return stored procedures as checklists with their freshness.
+
+        A procedure is a record of kind ``procedure``: it carries the steps,
+        how to verify the result, and when it was last confirmed. A stale
+        procedure is reported as stale, because a procedure that outlived its
+        environment is worse than no procedure at all.
+        """
+
+        return _call_tool(
+            "procedure",
+            {
+                "query": query,
+                "limit": limit,
+            },
+        )
+
+    @server.tool()
+    def memory_map(
+        output_path: str = "",
+    ) -> dict[str, Any]:
+        """Render the memory graph and write it to a file.
+
+        The graph shows the block tree, the records and the semantic links
+        between them. It is a snapshot, so this call refreshes the file and
+        returns where it is.
+        """
+
+        return _call_tool(
+            "memory_map",
+            {
+                "output_path": output_path,
+            },
+        )
+
+    @server.tool()
+    def recent(
+        limit: int = 8,
+        since: str = "",
+        include_candidates: bool = True,
+        logical_block_id: str = "",
+    ) -> dict[str, Any]:
+        """List the newest memory records newest-first, for session continuity."""
+
+        return _call_tool(
+            "recent",
+            {
+                "limit": limit,
+                "since": since,
+                "include_candidates": include_candidates,
+                "logical_block_id": logical_block_id,
+            },
+        )
+
+    @server.tool()
     def read_exact_record(record_id: str = "", evidence_ref: str = "") -> dict[str, Any]:
         """Read one canonical record by ID or an unambiguous exact evidence reference."""
 
@@ -823,6 +1284,7 @@ def create_mcp_server() -> FastMCP:
         logical_block_id: str = "",
         limit: int = 32,
         cursor: str = "",
+        include_retracted: bool = False,
     ) -> dict[str, Any]:
         """List bounded canonical IDs in one explicit scope with a frozen cursor."""
 
@@ -834,6 +1296,7 @@ def create_mcp_server() -> FastMCP:
                 "logical_block_id": logical_block_id,
                 "limit": limit,
                 "cursor": cursor,
+                "include_retracted": include_retracted,
             },
         )
 
@@ -891,13 +1354,14 @@ def create_mcp_server() -> FastMCP:
         retrieval_mode: RetrievalMode = "semantic",
         record_ids: list[str] | None = None,
         max_tokens: int = 2048,
+        render_context: bool = False,
         source_speakers: list[str] | None = None,
         temporal_mode: str = "current",
         as_of: str = "",
         known_as_of: str = "",
         revision_id: str = "",
     ) -> dict[str, Any]:
-        """Build prompt-safe context; searches all blocks when no block ids are given."""
+        """Build prompt-safe context; pass render_context=True for packed text."""
 
         block_ids = list(logical_block_ids or [])
         broad_search = bool(search_all or (not block_ids and not record_ids))
@@ -914,6 +1378,7 @@ def create_mcp_server() -> FastMCP:
                 "retrieval_mode": retrieval_mode,
                 "record_ids": record_ids,
                 "max_tokens": max_tokens,
+                "render_context": render_context,
                 "source_speakers": source_speakers,
                 "temporal_mode": temporal_mode,
                 "as_of": as_of,

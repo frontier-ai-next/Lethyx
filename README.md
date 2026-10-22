@@ -33,6 +33,21 @@ For development from a clone:
 python -m pip install -e ".[dev,mcp]"
 ```
 
+### Optional: multilingual semantic tier
+
+The default install stays small, runs on any machine, and never downloads a
+model. A local semantic tier is available as an extra:
+
+```console
+python -m pip install "lethyx[semantic]"
+```
+
+It downloads one multilingual sentence-embedding model on first use (about
+2.1 GB, CPU only, no API key) and lets a question in one script reach a record
+written in another script. `LETHYX_SEMANTIC=0` switches it off;
+`LETHYX_SEMANTIC_MODEL` and `LETHYX_SEMANTIC_CACHE_DIR` choose the model and
+where its files live. See [Quickstart](docs/lethyx/quickstart.md) for details.
+
 ## Embedded Python
 
 `MemoryClient.agent_instructions()` returns the memory-read guidance for your host's

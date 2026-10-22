@@ -958,6 +958,7 @@ class WorkspaceCatalogStore:
         reason: str,
         operation: str,
         allow_protected: bool = False,
+        backend_partition_id: str | None = None,
     ) -> TopologyBlockState:
         if state.protected and not allow_protected:
             raise ValueError("protected root cannot be amended")
@@ -973,7 +974,8 @@ class WorkspaceCatalogStore:
             cursor = self._conn.execute(
                 """
                 UPDATE topology_blocks
-                SET parent_id=?, status=?, revision=?, payload_json=?, updated_at=?
+                SET parent_id=?, status=?, revision=?, payload_json=?, updated_at=?,
+                    backend_partition_id=?
                 WHERE block_id=? AND workspace_id=? AND profile_id=? AND revision=?
                 """,
                 (
@@ -982,6 +984,11 @@ class WorkspaceCatalogStore:
                     state.revision + 1,
                     _json(asdict(block)),
                     now,
+                    (
+                        state.backend_partition_id
+                        if backend_partition_id is None
+                        else str(backend_partition_id)
+                    ),
                     state.block_id,
                     self.workspace_id,
                     self.profile_id,
