@@ -33,8 +33,8 @@ test("native Mnemosyne: pages, hypothesis, correction, focus switch, retraction 
     assert.equal(health.native_ok, true);
     assert.equal(health.effective_mode, "selected_native");
     const map = await call("block_map", {});
-    const leaf = await call("create_block", { name: "Constraint", synopsis: "Verified smoke constraint", parent_id: map.roots[0].block_id, reason: "isolated smoke" });
-    const secondLeaf = await call("create_block", { name: "Second topic", synopsis: "Independent second constraint", parent_id: map.roots[0].block_id, reason: "separate topic" });
+    const leaf = await call("create_block", { name: "Constraint", synopsis: "Verified smoke constraint", parent_id: map.roots[0].block_id, reason: "isolated smoke", scope: "project" });
+    const secondLeaf = await call("create_block", { name: "Second topic", synopsis: "Independent second constraint", parent_id: map.roots[0].block_id, reason: "separate topic", scope: "project" });
     const distractor = await call("create_block", { name: "Unrelated topic", synopsis: "Unrelated evidence", parent_id: map.roots[0].block_id, reason: "separate topic" });
     let cursor = "";
     const seen = [];
@@ -48,15 +48,22 @@ test("native Mnemosyne: pages, hypothesis, correction, focus switch, retraction 
     } while (cursor);
     assert.deepEqual(new Set(seen), new Set([leaf.block_id, secondLeaf.block_id, distractor.block_id]));
     const saved = await call("remember", { content: "The opaque constraint is A7K.", title: "Opaque constraint", kind: "user_preference", evidence_kind: "user_statement", requested_block_id: leaf.block_id });
+    execFileSync(process.env.UM_MEM_SMOKE_PYTHON, [
+      "-c",
+      "import sys; from um_mem import MemoryClient; result = MemoryClient(sys.argv[1], workspace_id='smoke', backend='mnemosyne').remember('The old shared workspace note is W4P.', title='Shared legacy note', evidence_kind='user_statement', requested_block_id=sys.argv[2]); assert result.saved",
+      root,
+      distractor.block_id,
+    ], { env: { ...process.env, ...env }, stdio: "pipe", timeout: 30_000 });
     const recalled = await call("recall", { query: "opaque constraint", logical_block_ids: [leaf.block_id] });
     assert.equal(recalled.items[0].kind, "user_preference");
-    await call("set_active_mask", { selected_block_ids: [leaf.block_id], token_budget: 500, activation_reason: "current smoke task" });
+    await call("set_active_mask", { selected_block_ids: [leaf.block_id, distractor.block_id], token_budget: 500, activation_reason: "current smoke task" });
     const round = async (sessionID) => {
       const event = { sessionID, system: [], messages: [] };
       await hooks.get("context")(event);
       return event.system.map((part) => part.text).join("\n");
     };
     assert.match(await round("native-a"), /A7K/);
+    assert.doesNotMatch(await round("native-a"), /W4P/);
     const updated = await call("amend", { memory_id: saved.memory_id, expected_revision: saved.revision_id, content: "The opaque constraint is B9R.", reason: "source correction", requested_block_id: leaf.block_id });
     assert.ok(updated.new_id);
     const next = await round("native-a");
@@ -66,6 +73,8 @@ test("native Mnemosyne: pages, hypothesis, correction, focus switch, retraction 
     const shared = await call("recall", { query: "opaque constraint", logical_block_ids: [leaf.block_id] }, "native-b");
     assert.match(shared.items[0].text, /B9R/);
     assert.equal(shared.items[0].authority, "advisory");
+    const legacy = await call("recall", { query: "old shared workspace note", logical_block_ids: [distractor.block_id] }, "native-b");
+    assert.match(legacy.items[0].text, /W4P/);
     const hypothesis = await call("remember", { content: "Unverified hypothesis: the second topic constraint is C5L.", title: "Second-topic hypothesis", requested_block_id: secondLeaf.block_id });
     let mask = await call("get_active_mask", {});
     await call("amend_active_mask", { mask_id: mask.mask_id, expected_revision: mask.revision, selected_block_ids: [secondLeaf.block_id], activation_reason: "switch to the second topic" });

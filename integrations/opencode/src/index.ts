@@ -1,6 +1,8 @@
 import { Plugin } from "@opencode/plugin";
 import { Error as ToolError } from "@opencode/plugin/promise/tool";
 import { createHash } from "node:crypto";
+import { existsSync, realpathSync } from "node:fs";
+import { dirname, join } from "node:path";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StdioClientTransport, getDefaultEnvironment } from "@modelcontextprotocol/sdk/client/stdio.js";
 import { CallToolResultSchema, type Tool } from "@modelcontextprotocol/sdk/types.js";
@@ -35,10 +37,26 @@ function object(value: unknown): Record<string, unknown> | undefined {
     ? value as Record<string, unknown> : undefined;
 }
 
+function projectID(directory: string): string {
+  const workingDirectory = realpathSync(directory);
+  let root = workingDirectory;
+  while (!existsSync(join(root, ".git"))) {
+    const parent = dirname(root);
+    if (parent === root) {
+      root = workingDirectory;
+      break;
+    }
+    root = parent;
+  }
+  const normalized = process.platform === "win32" ? root.normalize("NFC").toLowerCase() : root.normalize("NFC");
+  return "local-project-" + createHash("sha256").update(normalized).digest("hex").slice(0, 32);
+}
+
 export default Plugin.define({
   id: "um-mem",
   async setup(ctx) {
     const config = options(ctx.options);
+    const currentProjectID = projectID(ctx.location.directory);
     const connections = new Map<string, Connection>();
     let closed = false;
 
@@ -54,6 +72,9 @@ export default Plugin.define({
           // OpenCode's context hook exposes a session, not a stable per-task identity.
           UM_MEM_TASK_ID: `opencode-session:${sessionID}`,
           UM_MEM_SUBTASK_ID: "",
+          UM_MEM_PROJECT_ID: currentProjectID,
+          UM_MEM_ACTIVE_SCOPE_PROJECT_ONLY: "1",
+          UM_MEM_WRITE_SCOPE_PROJECT_ONLY: "1",
           UM_MEM_MCP_RESPONSE_MODE: "compact",
           UM_MEM_MCP_INSTRUCTIONS: config.env.UM_MEM_MCP_INSTRUCTIONS ?? "compact",
         },
@@ -155,9 +176,11 @@ export default Plugin.define({
     await ctx.session.hook("context", async (event) => {
       if (instructions) event.system.push({ type: "text", text: instructions });
       if (!config.maxTokens) return;
-      event.system.push({ type: "text", text: "This OpenCode adapter resolves the current session's active mask before each primary model round, including tool continuations. Tools use the same session scope. Choose or change focus explicitly; passive recall does not activate it." });
+      event.system.push({ type: "text", text: "Active context covers this project only. Subtask changes aren't detectable: if focus no longer applies, call transition_active_mask with a reason and select new focus; keep it if relevant. At completion choose: sourced lasting fact, explicitly unverified hypothesis, or nothing. For project facts, decisions, or hypotheses, use stable_project_facts, decisions_and_contracts, project_ideas, or reflection_candidates; this adapter routes them to matching project twins. Recall old workspace records explicitly; passive recall does not activate focus." });
       try {
-        const result = await call(event.sessionID, "resolve_active_mask", { max_tokens: config.maxTokens }, undefined, 10_000);
+        const result = await call(event.sessionID, "resolve_active_mask", {
+          max_tokens: config.maxTokens,
+        }, undefined, 10_000);
         const text = result.content.filter((part) => part.type === "text").map((part) => part.text).join("\n");
         const payload = object(result.structuredContent) ?? object(JSON.parse(text));
         const lease = object(payload?.lease);

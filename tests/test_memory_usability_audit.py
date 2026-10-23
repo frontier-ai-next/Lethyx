@@ -525,7 +525,7 @@ def test_navigation_reads_only_visible_branch_and_keeps_paths_links(tmp_path, mo
         assert expanded["path_ids"] == [root_id, branch["block_id"]]
         assert [child["block_id"] for child in expanded["children"]] == [leaf["block_id"]]
         assert expanded["children"][0]["links"]["related_block_ids"] == [other["block_id"]]
-        assert set(seen_edges) == {branch["block_id"], leaf["block_id"]}
+        assert seen_edges == []
         assert expanded["children"][0]["writable"] is True
     finally:
         index.close()
@@ -554,6 +554,8 @@ def test_navigation_envelope_projection_drops_raw_provider_diagnostics(monkeypat
                 "native_partitions": [{"large": "diagnostic"}],
             }
         ],
+        "related_count": 3,
+        "related_next_cursor": "next-graph-page",
         "health_hints": {"freshness": "2026-10-20T00:00:00Z"},
         "maintenance_observations": [],
         "proposal_options": [],
@@ -565,6 +567,8 @@ def test_navigation_envelope_projection_drops_raw_provider_diagnostics(monkeypat
     assert "native_partitions" not in compact["block"]
     assert "metrics" not in compact["block"]
     assert compact["related_block_ids"] == ["other"]
+    assert compact["related_count"] == 3
+    assert compact["related_next_cursor"] == "next-graph-page"
     assert len(json.dumps(compact, ensure_ascii=False)) < len(json.dumps(raw, ensure_ascii=False))
 
 

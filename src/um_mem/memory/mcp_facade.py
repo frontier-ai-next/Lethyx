@@ -1450,12 +1450,17 @@ def um_mem_navigation_envelope(
     repo_root: str = "",
     limit: int = 50,
     cursor: str = "",
+    related_cursor: str = "",
 ) -> dict[str, Any]:
     client = _client(repo_root=repo_root, workspace_id=workspace_id, backend=backend)
     try:
         return {
             "ok": True,
-            **_as_jsonable(client.navigation_envelope(block_id, limit=limit, cursor=cursor)),
+            **_as_jsonable(
+                client.navigation_envelope(
+                    block_id, limit=limit, cursor=cursor, related_cursor=related_cursor
+                )
+            ),
         }
     except Exception as exc:
         return {**_safe_error(exc), "workspace_id": client.workspace_id}
@@ -2029,6 +2034,7 @@ def um_mem_resolve_active_mask(
     repo_root: str = "",
     expected_revision: int | None = None,
     max_tokens: int | None = None,
+    scope_chain: list[str] | None = None,
 ) -> dict[str, Any]:
     client = _client(repo_root=repo_root, workspace_id=workspace_id, backend=backend)
     try:
@@ -2036,6 +2042,7 @@ def um_mem_resolve_active_mask(
             mask_id=mask_id,
             expected_revision=expected_revision,
             max_tokens=max_tokens,
+            scope_chain=tuple(scope_chain) if scope_chain is not None else None,
         )
         return {"ok": True, "lease": _as_jsonable(lease)}
     except Exception as exc:

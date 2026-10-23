@@ -1,12 +1,14 @@
 """Capture bounded Codex lifecycle facts through the authenticated local service."""
 
 import argparse
+import hashlib
 import json
 import sys
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 
+from um_mem.contracts.memory import normalize_identity_path
 from um_mem.integrations.hook_settings import (
     HookRegistration,
     install_project_hooks,
@@ -22,6 +24,7 @@ from um_mem.integrations.host_hook_capture import (
 from um_mem.memory.local_service import (
     LocalServiceClientPool,
     build_local_service_identity,
+    local_service_scope_lineage,
 )
 
 CODEX_HOOK_SCHEMA_VERSION = 1
@@ -220,6 +223,9 @@ def read_codex_prompt_context(
     if invocation.event_name != "UserPromptSubmit":
         return {"ok": True, "additional_context": ""}
     prompt = payload.get("prompt")
+    project_root = git_root(cwd)
+    project_path = normalize_identity_path(project_root, field_name="project_root")
+    project_id = "local-project-" + hashlib.sha256(project_path.encode("utf-8")).hexdigest()[:32]
     try:
         identity = build_local_service_identity(
             repo_root=Path(repo_root).expanduser().resolve() if repo_root else git_root(cwd),
@@ -230,15 +236,22 @@ def read_codex_prompt_context(
         )
     except ValueError:
         return {"ok": False, "error": "local service identity rejected"}
+    scope_lineage = local_service_scope_lineage(
+        identity, session_id=invocation.session_id, project_id=project_id
+    )
 
     client_pool = pool if pool is not None else LocalServiceClientPool()
     try:
         active = client_pool.call(
             identity,
             "resolve_active_mask",
-            {"max_tokens": _PROMPT_CONTEXT_MAX_TOKENS},
+            {
+                "max_tokens": _PROMPT_CONTEXT_MAX_TOKENS,
+                "scope_chain": [f"project:{project_id}"],
+            },
             timeout_seconds=4,
             session_id=invocation.session_id,
+            scope_lineage=scope_lineage,
         )
         lease = active.get("lease")
         if active.get("ok") is True and isinstance(lease, dict):
@@ -264,12 +277,13 @@ def read_codex_prompt_context(
                 "limit": 4,
                 "max_tokens": _PROMPT_CONTEXT_MAX_TOKENS,
                 "include_candidates": True,
-                "scope_chain": [f"workspace:{identity.workspace_id}"],
+                "scope_chain": [f"project:{project_id}"],
                 "search_all": True,
                 "render_context": False,
             },
             timeout_seconds=6,
             session_id=invocation.session_id,
+            scope_lineage=scope_lineage,
         )
     except (OSError, RuntimeError, TypeError, ValueError):
         return {"ok": False, "error": "local service context read failed"}

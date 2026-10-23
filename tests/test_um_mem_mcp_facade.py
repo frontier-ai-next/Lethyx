@@ -729,6 +729,35 @@ def test_mcp_server_binds_identity_outside_every_tool_schema() -> None:
         assert schema["additionalProperties"] is False
 
 
+def test_mcp_project_active_scope_is_bound_by_host_environment(monkeypatch, tmp_path: Path) -> None:
+    monkeypatch.setenv("UM_MEM_REPO_ROOT", str(tmp_path))
+    monkeypatch.setenv("UM_MEM_WORKSPACE", "alpha")
+    monkeypatch.setenv("UM_MEM_BACKEND", "mempalace")
+    monkeypatch.setenv("UM_MEM_PROJECT_ID", "project-alpha")
+    monkeypatch.setenv("UM_MEM_ACTIVE_SCOPE_PROJECT_ONLY", "1")
+    dispatched: list[dict[str, object]] = []
+
+    def fake_service_call(identity, lineage, name, arguments):
+        assert identity.workspace_id == "alpha"
+        assert lineage.project_id == "project-alpha"
+        assert name == "resolve_active_mask"
+        dispatched.append(dict(arguments))
+        return {
+            "ok": True,
+            "lease": {"rendered_context": "", "trace": {"resolution_status": "not_found"}},
+        }
+
+    monkeypatch.setattr(mcp_server, "_service_call", fake_service_call)
+    assert mcp_server._call_tool("resolve_active_mask", {"max_tokens": 256})["ok"] is True
+    assert dispatched == [{"max_tokens": 256, "scope_chain": ["project:project-alpha"]}]
+
+    monkeypatch.delenv("UM_MEM_PROJECT_ID")
+    assert mcp_server._call_tool("resolve_active_mask", {"max_tokens": 256}) == {
+        "ok": False,
+        "error": "project-scoped active context requires project identity",
+    }
+
+
 def test_mcp_server_remember_routes_child_claim_transport(monkeypatch) -> None:
     dispatched: list[tuple[str, dict[str, object]]] = []
     transport = {

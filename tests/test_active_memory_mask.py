@@ -100,6 +100,92 @@ def test_active_mask_is_durable_and_resolves_new_canonical_head_each_round(
         index.close()
 
 
+def test_project_scope_filters_latest_selector_before_its_limit(tmp_path: Path) -> None:
+    index = BackendSQLiteIndex(tmp_path / "memory.sqlite", backend_id="test", workspace_id="alpha")
+    try:
+        client = MemoryClient(
+            tmp_path,
+            workspace_id="alpha",
+            profile_id="default",
+            project_id="project-a",
+            session_id="session-a",
+            task_id="task-a",
+            backend_instance=index,
+        )
+        root_id = client.block_map()[0]["block_id"]
+        project_leaf = client.create_leaf_block(
+            name="Project context",
+            synopsis="Facts for project A.",
+            parent_id=root_id,
+            scope="project",
+            reason="test scoped selector",
+        )
+        project = client.remember(
+            "Project A value is P7.", requested_block_id=project_leaf["block_id"]
+        )
+        other_project = MemoryClient(
+            tmp_path,
+            workspace_id="alpha",
+            profile_id="default",
+            project_id="project-b",
+            session_id="session-b",
+            task_id="task-b",
+            backend_instance=index,
+        )
+        foreign = other_project.remember(
+            "Project B value is W9.", requested_block_id=project_leaf["block_id"]
+        )
+        assert project.saved and foreign.saved
+        mask = client.set_active_mask(
+            selected_block_ids=(project_leaf["block_id"],),
+            selectors=(
+                ActiveMemorySelector(
+                    block_id=project_leaf["block_id"],
+                    selector_type="latest_records",
+                    limit=1,
+                ),
+            ),
+            token_budget=400,
+            activation_reason="project context",
+        )
+        lease = client.resolve_active_mask(
+            mask_id=mask.mask_id,
+            scope_chain=("project:project-a",),
+        )
+        assert lease.trace.record_ids == (project.memory_id,)
+        assert "W9" not in lease.render()
+        query_client = MemoryClient(
+            tmp_path,
+            workspace_id="alpha",
+            profile_id="default",
+            project_id="project-a",
+            session_id="session-a",
+            task_id="task-query",
+            backend_instance=index,
+        )
+        query_mask = query_client.set_active_mask(
+            selected_block_ids=(project_leaf["block_id"],),
+            selectors=(
+                ActiveMemorySelector(
+                    block_id=project_leaf["block_id"],
+                    selector_type="backend_query",
+                    query="Project value",
+                    limit=1,
+                ),
+            ),
+            token_budget=400,
+            activation_reason="project search",
+        )
+        query_lease = query_client.resolve_active_mask(
+            mask_id=query_mask.mask_id,
+            scope_chain=("project:project-a",),
+        )
+        assert query_lease.trace.record_ids == (project.memory_id,)
+        assert "W9" not in query_lease.render()
+    finally:
+        index.close()
+
+
 def test_scope_mismatch_returns_empty_typed_resolution_without_changing_mask(
     tmp_path: Path,
 ) -> None:

@@ -96,6 +96,13 @@ limited to 201 materialized node descriptions. Child summaries retain the full
 count and branch/writability semantics even when their child-ID preview is empty.
 Follow their cursor with `expand_block` to inspect the omitted children. Protected
 policy-tree cursors additionally bind the compiled policy-catalog revision.
+Graph neighbors have a separate bounded page: `related_blocks_page(limit=50, cursor="")`
+returns `related_count` and `related_next_cursor`. `navigation_envelope` accepts
+`related_cursor` independently of its child cursor. Graph cursors bind the
+workspace, profile, block and catalog revision; a changed graph requires a fresh
+page walk. Expansion previews the selected block's first edge page and at most
+16 displayed children's first eight edges; its completeness flags distinguish
+that preview from a full neighborhood.
 
 Expansion uses `block_health` for only the selected node and visible child page.
 It reads persisted native-partition identities and observations without probing a
@@ -243,6 +250,10 @@ These are deliberately different mechanisms:
   explicitly when its working focus changes. A typical model workflow is: navigate, recall or write,
   decide that part of the context must remain in focus, then set or amend the mask. When focus ends,
   the model suspends or deactivates it.
+  A host may pass an exact `scope_chain` to `resolve_active_mask`; records outside
+  it are excluded before rendering. Codex and OpenCode derive a project identity
+  from the current Git root for automatic context, so older records in a shared
+  workspace remain available through explicit search without entering that context.
 - **Recall** is a temporary, model-requested read from explicitly selected passive leaves. A recall
   result does not become sticky and does not amend the active mask unless the model performs a
   separate typed mask mutation.

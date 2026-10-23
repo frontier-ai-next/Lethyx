@@ -34,6 +34,10 @@ _BLOCK_FIELDS = (
     "index_only",
     "diagnostics_status",
     "metrics_scope",
+    "related_block_ids",
+    "related_block_ids_scope",
+    "related_block_ids_complete",
+    "related_edges_truncated",
 )
 
 _RECORD_FIELDS = (
@@ -50,6 +54,8 @@ _RECORD_FIELDS = (
     "authority",
     "truncated",
 )
+
+_EXACT_RECORD_FIELDS = (*_RECORD_FIELDS, "evidence_refs", "revision_of")
 
 _ERROR_FIELDS = (
     "ok",
@@ -115,8 +121,8 @@ def _compact_blocks(values: Any) -> list[dict[str, Any]]:
     return [_compact_block(value) for value in values]
 
 
-def _compact_record(record: Any) -> dict[str, Any]:
-    compact = _pick(record, _RECORD_FIELDS)
+def _compact_record(record: Any, *, exact: bool = False) -> dict[str, Any]:
+    compact = _pick(record, _EXACT_RECORD_FIELDS if exact else _RECORD_FIELDS)
     if not isinstance(record, dict):
         return compact
     if not compact.get("record_id"):
@@ -127,10 +133,10 @@ def _compact_record(record: Any) -> dict[str, Any]:
     return compact
 
 
-def _compact_records(values: Any) -> list[dict[str, Any]]:
+def _compact_records(values: Any, *, exact: bool = False) -> list[dict[str, Any]]:
     if not isinstance(values, (list, tuple)):
         return []
-    return [_compact_record(value) for value in values]
+    return [_compact_record(value, exact=exact) for value in values]
 
 
 def _compact_route(route: Any) -> dict[str, Any]:
@@ -433,7 +439,19 @@ def compact_response(name: str, result: Any) -> Any:
             "backend": result.get("backend"),
             "root": _compact_block(result.get("root")),
             "children": _compact_blocks(result.get("children")),
-            **_pick(result, ("path_ids", "catalog_revision", "child_count", "next_cursor")),
+            **_pick(
+                result,
+                (
+                    "path_ids",
+                    "catalog_revision",
+                    "child_count",
+                    "next_cursor",
+                    "related_edges_scope",
+                    "related_edges_truncated",
+                    "related_edges_limit",
+                    "root_related_next_cursor",
+                ),
+            ),
         }
     if name == "create_block":
         return _compact_block_mutation(result)
@@ -645,7 +663,19 @@ def compact_response(name: str, result: Any) -> Any:
             "profile_id": result.get("profile_id"),
             "catalog_revision": result.get("catalog_revision"),
             "tree_path": list(result.get("tree_path") or []),
-            **_pick(result, ("child_count", "next_cursor")),
+            **_pick(
+                result,
+                (
+                    "child_count",
+                    "next_cursor",
+                    "related_count",
+                    "related_next_cursor",
+                    "related_edges_scope",
+                    "related_edges_truncated",
+                    "related_edges_limit",
+                    "root_related_next_cursor",
+                ),
+            ),
             "block": _compact_block(block),
             "children": _compact_blocks(result.get("children")),
             "related_block_ids": related_ids,
@@ -658,12 +688,12 @@ def compact_response(name: str, result: Any) -> Any:
         record = result.get("record") if isinstance(result.get("record"), dict) else {}
         return {
             "ok": result.get("ok"),
-            "record": _compact_record(record),
+            "record": _compact_record(record, exact=True),
         }
     if name == "read_exact_records":
         return {
             "ok": result.get("ok"),
-            "records": _compact_records(result.get("records")),
+            "records": _compact_records(result.get("records"), exact=True),
         }
     if name == "list_records":
         return {

@@ -66,6 +66,7 @@ MAINTENANCE_OBSERVATION_TYPES = frozenset(
 )
 
 _SCHEMA_VERSION = 2
+_NAVIGATION_EDGE_PREVIEW_LIMIT = 128
 _CREATE = """
 CREATE TABLE catalog_metadata (
     key TEXT PRIMARY KEY,
@@ -297,6 +298,7 @@ class TopologyNavigation:
     catalog_revision: int
     child_counts: dict[str, int]
     next_cursors: dict[str, str]
+    edges_truncated: bool = False
 
 
 def navigation_cursor(
@@ -494,6 +496,18 @@ class WorkspaceCatalogStore:
             self._conn.execute(
                 "CREATE INDEX IF NOT EXISTS idx_topology_navigation_order ON topology_blocks"
                 "(workspace_id, profile_id, parent_id, status, created_at, block_id)"
+            )
+            self._conn.execute(
+                "CREATE INDEX IF NOT EXISTS idx_topology_edges_src_order ON topology_edges"
+                "(workspace_id, profile_id, src_id, created_at, edge_id)"
+            )
+            self._conn.execute(
+                "CREATE INDEX IF NOT EXISTS idx_topology_edges_dst_order ON topology_edges"
+                "(workspace_id, profile_id, dst_id, created_at, edge_id)"
+            )
+            self._conn.execute(
+                "CREATE INDEX IF NOT EXISTS idx_topology_edges_profile_recent ON topology_edges"
+                "(workspace_id, profile_id, created_at, edge_id)"
             )
         existing = self._conn.execute("SELECT block_id FROM topology_blocks LIMIT 1").fetchone()
         if existing is None:
@@ -1005,7 +1019,7 @@ class WorkspaceCatalogStore:
                 ]
             states: list[TopologyBlockState] = []
             children: dict[str, tuple[str, ...]] = {}
-            edges: dict[str, tuple[BlockGraphEdge, ...]] = {}
+            edges: dict[str, list[BlockGraphEdge]] = {}
             counts: dict[str, int] = {}
             cursors: dict[str, str] = {}
             for selected_id, level in pending:
@@ -1045,12 +1059,52 @@ class WorkspaceCatalogStore:
                     if len(rows) > page_limit
                     else ""
                 )
-                if include_edges:
-                    edges[selected_id] = tuple(self.edges_for(selected_id))
                 if level < depth:
                     pending.extend((child_id, level + 1) for child_id in children[selected_id])
+            edges_truncated = False
+            if include_edges:
+                # The panel includes the selected block and its displayed page
+                # of children. Deeper nodes may be present only to compute
+                # child summaries, so they are outside this edge preview.
+                visible_ids = tuple(sorted({block_id, *children.get(block_id, ())}))
+                edges_truncated = len(visible_ids) < len(states)
+                visible_values = ",".join("(?)" for _ in visible_ids)
+                edge_rows = self._conn.execute(
+                    f"""
+                    WITH visible_src(block_id) AS (VALUES {visible_values}),
+                         visible_dst(block_id) AS (VALUES {visible_values})
+                    SELECT edge_id, workspace_id, profile_id, src_id, dst_id, edge_type,
+                           reason, revision, created_at
+                    FROM visible_src AS source
+                    CROSS JOIN visible_dst AS target
+                    CROSS JOIN topology_edges AS edge
+                    WHERE edge.workspace_id=? AND edge.profile_id=?
+                      AND edge.src_id=source.block_id AND edge.dst_id=target.block_id
+                    LIMIT ?
+                    """,
+                    (
+                        *visible_ids,
+                        *visible_ids,
+                        self.workspace_id,
+                        self.profile_id,
+                        _NAVIGATION_EDGE_PREVIEW_LIMIT + 1,
+                    ),
+                ).fetchall()
+                edges_truncated = edges_truncated or len(edge_rows) > _NAVIGATION_EDGE_PREVIEW_LIMIT
+                for row in edge_rows[:_NAVIGATION_EDGE_PREVIEW_LIMIT]:
+                    edge = self._edge(row)
+                    edges.setdefault(edge.src_id, []).append(edge)
+                    if edge.dst_id != edge.src_id:
+                        edges.setdefault(edge.dst_id, []).append(edge)
             return TopologyNavigation(
-                tuple(states), tuple(reversed(path)), children, edges, revision, counts, cursors
+                tuple(states),
+                tuple(reversed(path)),
+                children,
+                {block_id: tuple(items) for block_id, items in edges.items()},
+                revision,
+                counts,
+                cursors,
+                edges_truncated,
             )
 
     def create_block(
@@ -1363,19 +1417,96 @@ class WorkspaceCatalogStore:
         ).fetchall()
         return [self._edge(row) for row in rows]
 
-    def list_edges(self) -> list[BlockGraphEdge]:
-        """Return the complete content-free graph for this workspace profile."""
+    def edge_page(
+        self,
+        block_id: str,
+        *,
+        limit: int = 50,
+        cursor: str = "",
+        expected_revision: int | None = None,
+    ) -> tuple[list[BlockGraphEdge], int, str, int]:
+        if type(limit) is not int or not 1 <= limit <= 200:
+            raise ValueError("related block limit must be an integer from 1 to 200")
+        with self._conn:
+            self._conn.execute("BEGIN")
+            revision = self.catalog_revision()
+            if expected_revision is not None and revision != expected_revision:
+                raise CatalogRevisionConflict("catalog changed while reading navigation")
+            after = read_navigation_cursor(
+                cursor,
+                workspace_id=self.workspace_id,
+                profile_id=self.profile_id,
+                block_id=f"graph:{block_id}",
+                revision=str(revision),
+            )
+            scope = (self.workspace_id, self.profile_id, block_id, block_id)
+            total = int(
+                self._conn.execute(
+                    "SELECT COUNT(*) FROM topology_edges WHERE workspace_id=? AND profile_id=? "
+                    "AND (src_id=? OR dst_id=?)",
+                    scope,
+                ).fetchone()[0]
+            )
+            page_size = limit + 1
+            rows = self._conn.execute(
+                "WITH outgoing AS ("
+                "SELECT edge_id, workspace_id, profile_id, src_id, dst_id, edge_type, "
+                "reason, revision, created_at FROM topology_edges "
+                "WHERE workspace_id=? AND profile_id=? AND src_id=? "
+                "AND (created_at,edge_id)>(?,?) ORDER BY created_at,edge_id LIMIT ?), "
+                "incoming AS ("
+                "SELECT edge_id, workspace_id, profile_id, src_id, dst_id, edge_type, "
+                "reason, revision, created_at FROM topology_edges "
+                "WHERE workspace_id=? AND profile_id=? AND dst_id=? AND src_id<>? "
+                "AND (created_at,edge_id)>(?,?) ORDER BY created_at,edge_id LIMIT ?) "
+                "SELECT * FROM outgoing UNION ALL SELECT * FROM incoming "
+                "ORDER BY created_at,edge_id LIMIT ?",
+                (
+                    self.workspace_id,
+                    self.profile_id,
+                    block_id,
+                    *after,
+                    page_size,
+                    self.workspace_id,
+                    self.profile_id,
+                    block_id,
+                    block_id,
+                    *after,
+                    page_size,
+                    page_size,
+                ),
+            ).fetchall()
+            shown = rows[:limit]
+            next_cursor = (
+                navigation_cursor(
+                    self.workspace_id,
+                    self.profile_id,
+                    f"graph:{block_id}",
+                    str(revision),
+                    (str(shown[-1][8]), str(shown[-1][0])),
+                )
+                if len(rows) > limit
+                else ""
+            )
+            return [self._edge(row) for row in shown], total, next_cursor, revision
 
-        rows = self._conn.execute(
-            """
+    def list_edges(self, *, limit: int | None = None) -> list[BlockGraphEdge]:
+        """Return content-free graph edges, optionally with a SQL row limit."""
+
+        query = """
             SELECT edge_id, workspace_id, profile_id, src_id, dst_id, edge_type,
                    reason, revision, created_at
             FROM topology_edges
             WHERE workspace_id=? AND profile_id=?
             ORDER BY created_at, edge_id
-            """,
-            (self.workspace_id, self.profile_id),
-        ).fetchall()
+            """
+        params: tuple[Any, ...] = (self.workspace_id, self.profile_id)
+        if limit is not None:
+            if type(limit) is not int or limit < 1:
+                raise ValueError("edge list limit must be a positive integer")
+            query += " LIMIT ?"
+            params += (limit,)
+        rows = self._conn.execute(query, params).fetchall()
         return [self._edge(row) for row in rows]
 
     def remove_edge(

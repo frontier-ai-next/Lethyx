@@ -34,12 +34,20 @@ host or prove a live tool call. MCP is tools-only: these two integrations do not
 deliver an exact active-memory mask before every model round. Hooks are
 best-effort, advisory lifecycle observations and cannot block the host task.
 On `UserPromptSubmit`, the Codex hook first resolves the active mask for that
-exact session. If it has no usable context, the hook retrieves bounded workspace
-memory by prompt and passes it as supplemental context. Candidate records may
+exact session. If it has no usable context, the hook retrieves bounded memory
+from the current project by prompt and passes it as supplemental context. The
+project ID is derived from the normalized Git-root path; different worktrees
+of one repository currently have different IDs. Candidate records may
 appear in the fallback as unverified evidence; lifecycle-only hook records are
 omitted. This runs at the prompt boundary, not before every internal model
 request. An active mask must be deliberately set for the Codex session; a mask
 from another session is not inherited.
+Older workspace records remain available through explicit MCP search. The
+user-level Codex MCP process has no trusted identity for the current project,
+so a new record written through that global MCP process to a workspace leaf
+does not enter project-only automatic context. A project-aware host binding is
+required for automatic delivery of those new writes; do not set one global
+`UM_MEM_PROJECT_ID` for multiple projects.
 Claude/Codex `Stop` events mean a completed response/turn; only `SessionEnd`
 means the session ended.
 

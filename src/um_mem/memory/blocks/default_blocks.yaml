@@ -71,7 +71,7 @@
       use_when: [project fact, exact path, code symbol, command, dependency, current project value, decision, artifact claim, workspace event]
       avoid_when: [binding directive, current task checkpoint, unverified idea]
     parent_id: memory_root_index
-    child_ids: [user_global_preferences, project_resources, code_resources, stable_project_facts, mutable_project_state, decisions_and_contracts, artifact_claims, workspace_episodes]
+    child_ids: [user_global_preferences, project_resources, code_resources, stable_project_facts, project_scope_stable_project_facts, mutable_project_state, decisions_and_contracts, project_scope_decisions_and_contracts, artifact_claims, workspace_episodes]
     index_only: true
     token_budget: 0
   - block_id: archive_memory_index
@@ -87,7 +87,7 @@
       use_when: [idea, hypothesis, reflection candidate, transient diagnostic log]
       avoid_when: [verified fact, binding instruction, current task state]
     parent_id: memory_root_index
-    child_ids: [project_ideas, reflection_candidates, transient_logs]
+    child_ids: [project_ideas, project_scope_project_ideas, reflection_candidates, project_scope_reflection_candidates, transient_logs]
     index_only: true
     token_budget: 0
   - block_id: user_global_core_directives
@@ -260,6 +260,27 @@
     isolation_policy: {dimension: workspace, cross_workspace: false}
     retrieval_policy: {mode: hybrid, limit: 8, require_query_seed: true}
     token_budget: 800
+  - block_id: project_scope_stable_project_facts
+    block_type: stable_semantic_fact
+    temperature: warm
+    scope: project
+    authority: advisory
+    delivery_policy: on_demand
+    retention: durable
+    tags: [project, fact, repository, source, command, test, dependency, configuration]
+    semantic_memberships: [semantic, project]
+    guidance:
+      synopsis: Evidence-backed stable project facts
+      use_when: [stable repository fact, command, dependency, configuration]
+      avoid_when: [mutable status, decision, artifact claim]
+    parent_id: semantic_memory_index
+    producer: canonical_writer
+    consumers: [memory_agent, context_packer]
+    recall_path: hybrid_recall
+    lifecycle_policy: {initial_status: candidate, mutable: true, terminal_statuses: [superseded, deprecated, retracted]}
+    isolation_policy: {dimension: project, cross_workspace: false}
+    retrieval_policy: {mode: hybrid, limit: 8, require_query_seed: true}
+    token_budget: 800
   - block_id: mutable_project_state
     block_type: mutable_state
     temperature: hot
@@ -292,6 +313,23 @@
     recall_path: hybrid_recall
     lifecycle_policy: {initial_status: candidate, mutable: true, terminal_statuses: [superseded, deprecated, retracted]}
     isolation_policy: {dimension: workspace, cross_workspace: false}
+    retrieval_policy: {mode: hybrid, limit: 8, require_query_seed: true}
+    token_budget: 800
+  - block_id: project_scope_decisions_and_contracts
+    block_type: decision_contract
+    temperature: warm
+    scope: project
+    authority: advisory
+    delivery_policy: on_demand
+    retention: durable
+    tags: [project, decision, contract, architecture]
+    semantic_memberships: [semantic, procedural]
+    parent_id: semantic_memory_index
+    producer: verified_writer
+    consumers: [memory_agent, tribunal]
+    recall_path: hybrid_recall
+    lifecycle_policy: {initial_status: candidate, mutable: true, terminal_statuses: [superseded, deprecated, retracted]}
+    isolation_policy: {dimension: project, cross_workspace: false}
     retrieval_policy: {mode: hybrid, limit: 8, require_query_seed: true}
     token_budget: 800
   - block_id: artifact_claims
@@ -342,6 +380,21 @@
     recall_path: reflection_queue
     lifecycle_policy: {initial_status: candidate, mutable: true, terminal_statuses: [deprecated, retracted]}
     isolation_policy: {dimension: workspace, cross_workspace: false}
+  - block_id: project_scope_project_ideas
+    block_type: idea_queue
+    temperature: cold
+    scope: project
+    authority: advisory
+    delivery_policy: reflection_only
+    retention: durable
+    tags: [idea, hypothesis, research_lead]
+    semantic_memberships: [reflection, semantic]
+    parent_id: archive_memory_index
+    producer: reflection_writer
+    consumers: [refiner, evaluator]
+    recall_path: reflection_queue
+    lifecycle_policy: {initial_status: candidate, mutable: true, terminal_statuses: [deprecated, retracted]}
+    isolation_policy: {dimension: project, cross_workspace: false}
   - block_id: reflection_candidates
     block_type: reflection_queue
     temperature: warm
@@ -357,6 +410,21 @@
     recall_path: reflection_queue
     lifecycle_policy: {initial_status: candidate, mutable: true, terminal_statuses: [quarantined, retracted]}
     isolation_policy: {dimension: workspace, cross_workspace: false}
+  - block_id: project_scope_reflection_candidates
+    block_type: reflection_queue
+    temperature: warm
+    scope: project
+    authority: advisory
+    delivery_policy: reflection_only
+    retention: durable
+    tags: [reflection, candidate]
+    semantic_memberships: [reflection, semantic]
+    parent_id: archive_memory_index
+    producer: reflection_writer
+    consumers: [tribunal, refiner]
+    recall_path: reflection_queue
+    lifecycle_policy: {initial_status: candidate, mutable: true, terminal_statuses: [quarantined, retracted]}
+    isolation_policy: {dimension: project, cross_workspace: false}
   - block_id: transient_logs
     block_type: transient_logs
     temperature: cold

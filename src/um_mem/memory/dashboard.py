@@ -8,6 +8,7 @@ reconnection outside the ring explicitly requests a fresh canonical snapshot.
 import argparse
 import hmac
 import json
+import math
 import os
 import secrets
 import subprocess
@@ -34,6 +35,10 @@ from um_mem.memory.local_service import (
 )
 
 _ASSETS = {"app.js": "text/javascript", "style.css": "text/css"}
+_RECORD_GRAPH_EDGE_LIMIT = 128
+_RECORD_GRAPH_EDGE_BYTE_LIMIT = 64 * 1024
+_RECORD_GRAPH_EVIDENCE_LIMIT = 4
+_RECORD_GRAPH_TEXT_LIMIT = 240
 _READS = {"recall", "build_context", "build_granted_context", "resolve_active_mask"}
 _QUIET = {
     "health",
@@ -103,6 +108,77 @@ def _summary(record: Any) -> dict[str, Any]:
         "tags": list(record.tags),
         "authority": record.authority,
     }
+
+
+def _record_graph_edges(client: Any, records: list[Any]) -> tuple[list[dict[str, Any]], bool]:
+    visible_ids = {record.block_id for record in records}
+    backend = getattr(client, "backend", None)
+    edge_reader = getattr(backend, "edges_between", None)
+    if not visible_ids or not callable(edge_reader):
+        return [], False
+
+    edges: dict[tuple[str, str, str], dict[str, Any]] = {}
+    encoded_size = 0
+    candidates = edge_reader(tuple(sorted(visible_ids)), limit=_RECORD_GRAPH_EDGE_LIMIT + 1)
+    truncated = len(candidates) > _RECORD_GRAPH_EDGE_LIMIT
+    for edge in candidates[:_RECORD_GRAPH_EDGE_LIMIT]:
+        src_id = str(edge.src_id)
+        dst_id = str(edge.dst_id)
+        evidence_refs = tuple(edge.evidence_refs or ())
+        if (
+            not evidence_refs
+            or edge.workspace_id != client.workspace_id
+            or src_id not in visible_ids
+            or dst_id not in visible_ids
+            or src_id == dst_id
+        ):
+            continue
+        weight = float(edge.weight)
+        if not math.isfinite(weight):
+            continue
+        key = (src_id, dst_id, str(edge.edge_type))
+        if key in edges:
+            continue
+        if len(edges) >= _RECORD_GRAPH_EDGE_LIMIT:
+            return list(edges.values()), True
+        refs_truncated = len(evidence_refs) > _RECORD_GRAPH_EVIDENCE_LIMIT
+        evidence = []
+        for ref in evidence_refs[:_RECORD_GRAPH_EVIDENCE_LIMIT]:
+            ref_id = str(ref.ref_id)
+            ref_hash = str(ref.hash or "")
+            evidence.append(
+                {
+                    "ref_type": str(ref.ref_type),
+                    "ref_id": ref_id[:_RECORD_GRAPH_TEXT_LIMIT],
+                    "hash": ref_hash[:_RECORD_GRAPH_TEXT_LIMIT],
+                    "produced_by": str(ref.produced_by)[:64],
+                    "producer_id": str(ref.producer_id)[:_RECORD_GRAPH_TEXT_LIMIT],
+                }
+            )
+            refs_truncated |= (
+                len(ref_id) > _RECORD_GRAPH_TEXT_LIMIT
+                or len(ref_hash) > _RECORD_GRAPH_TEXT_LIMIT
+                or len(str(ref.produced_by)) > 64
+                or len(str(ref.producer_id)) > _RECORD_GRAPH_TEXT_LIMIT
+            )
+        reason = str(edge.reason or "")
+        payload = {
+            "src_id": src_id,
+            "dst_id": dst_id,
+            "edge_type": str(edge.edge_type),
+            "reason": reason[:_RECORD_GRAPH_TEXT_LIMIT],
+            "reason_truncated": len(reason) > _RECORD_GRAPH_TEXT_LIMIT,
+            "weight": weight,
+            "evidence_refs": evidence,
+            "evidence_ref_count": len(evidence_refs),
+            "evidence_refs_truncated": refs_truncated,
+        }
+        edge_size = len(json.dumps(payload, ensure_ascii=False).encode("utf-8"))
+        if encoded_size + edge_size > _RECORD_GRAPH_EDGE_BYTE_LIMIT:
+            return list(edges.values()), True
+        edges[key] = payload
+        encoded_size += edge_size
+    return list(edges.values()), truncated
 
 
 class Dashboard:
@@ -179,18 +255,34 @@ class Dashboard:
             }
         )
 
-    def snapshot(self) -> dict[str, Any]:
+    def snapshot(self, *, scope: str = "workspace", scope_id: str = "") -> dict[str, Any]:
         # Capture the cursor first: a concurrent commit will be replayed after
         # this read, even if the read happened to observe the new state already.
         cursor = self.feed.cursor
         client = self.runtime.client
-        catalog = client.catalog_snapshot()
+        if scope not in {"workspace", "project"}:
+            raise ValueError("Panel record scope must be workspace or project")
+        if scope == "workspace":
+            if scope_id and scope_id != client.workspace_id:
+                raise ValueError("Workspace scope ID does not match this panel")
+            effective_scope_id = client.workspace_id
+        else:
+            if not isinstance(scope_id, str) or not scope_id or scope_id != scope_id.strip():
+                raise ValueError("An exact project scope ID is required")
+            effective_scope_id = scope_id
+        catalog = client.catalog_snapshot(edge_limit=128)
         nodes = {b["block_id"]: {**b, "children": []} for b in catalog["blocks"]}
         tree: list[dict[str, Any]] = []
         for node in nodes.values():
             parent = nodes.get(node.get("parent_id"))
             (parent["children"] if parent else tree).append(node)
-        records = client.recent_records(limit=64, include_candidates=True)
+        records = client.recent_records(
+            limit=64,
+            scope=scope,
+            scope_id=effective_scope_id,
+            include_candidates=True,
+        )
+        record_edges, record_edges_truncated = _record_graph_edges(client, records)
         with self.feed.condition:
             events = list(self.feed.events)
         with self.runtime._leases_lock:
@@ -204,7 +296,17 @@ class Dashboard:
             "cursor": cursor,
             "tree": tree,
             "edges": catalog["edges"],
+            "block_edges_truncated": bool(catalog.get("edges_truncated", False)),
+            "block_edge_limit": int(catalog.get("edge_limit", 128)),
             "records": [_summary(r) for r in records],
+            "record_scope": scope,
+            "record_scope_id": effective_scope_id,
+            "record_edges": record_edges,
+            "record_edges_truncated": record_edges_truncated,
+            "record_graph_scope": "recent_records",
+            "record_graph_scope_limit": 64,
+            "record_graph_edge_limit": _RECORD_GRAPH_EDGE_LIMIT,
+            "record_graph_edge_byte_limit": _RECORD_GRAPH_EDGE_BYTE_LIMIT,
             "recent_limit": 64,
             "workspace": client.workspace_id,
             "profile": client.profile_id,
@@ -214,17 +316,46 @@ class Dashboard:
             "sessions": list(sessions.values()),
         }
 
-    def records(self, block: str, cursor: str) -> dict[str, Any]:
+    def records(
+        self, block: str, cursor: str, *, scope: str = "workspace", scope_id: str = ""
+    ) -> dict[str, Any]:
         client = self.runtime.client
-        if not block:
-            raise ValueError("Select a topic to page through its records")
-        page = client.list_records(
-            scope="workspace",
-            scope_id=client.workspace_id,
-            logical_block_id=block,
-            limit=64,
-            cursor=cursor,
-        )
+        if scope not in {"workspace", "project"}:
+            raise ValueError("Panel record scope must be workspace or project")
+        if scope == "workspace":
+            if scope_id and scope_id != client.workspace_id:
+                raise ValueError("Workspace scope ID does not match this panel")
+            effective_scope_id = client.workspace_id
+        else:
+            if not isinstance(scope_id, str) or not scope_id or scope_id != scope_id.strip():
+                raise ValueError("An exact project scope ID is required")
+            effective_scope_id = scope_id
+        try:
+            page = client.list_records(
+                scope=scope,
+                scope_id=effective_scope_id,
+                logical_block_id=block,
+                limit=64,
+                cursor=cursor,
+            )
+        except ValueError as exc:
+            if str(exc) != "list_records scope exceeds 2048 records; select a narrower scope":
+                raise
+            recent = client.recent_records(
+                limit=64,
+                scope=scope,
+                scope_id=effective_scope_id,
+                logical_block_id=block,
+                include_candidates=True,
+            )
+            return {
+                "ok": True,
+                "records": [_summary(record) for record in recent],
+                "next_cursor": "",
+                "scope_limited": True,
+                "scope_limit": 2048,
+                "recent_limit": 64,
+            }
         ids = [r["record_id"] for r in page["records"]]
         records = client.read_exact_records(ids) if ids else []
         return {**page, "ok": True, "records": [_summary(r) for r in records]}
@@ -431,9 +562,20 @@ class Dashboard:
             elif handler.command == "GET" and route.path == "/panel/api/events":
                 self._events(handler, handler.headers.get("Last-Event-ID") or value("since"))
             elif handler.command == "GET" and route.path == "/panel/api/snapshot":
-                self._send(handler, self.snapshot())
+                self._send(
+                    handler,
+                    self.snapshot(scope=value("scope") or "workspace", scope_id=value("scope_id")),
+                )
             elif handler.command == "GET" and route.path == "/panel/api/records":
-                self._send(handler, self.records(value("block"), value("cursor")))
+                self._send(
+                    handler,
+                    self.records(
+                        value("block"),
+                        value("cursor"),
+                        scope=value("scope") or "workspace",
+                        scope_id=value("scope_id"),
+                    ),
+                )
             elif handler.command == "GET" and route.path == "/panel/api/record":
                 self._send(handler, self.record(value("id")))
             elif handler.command == "POST" and route.path == "/panel/api/call":

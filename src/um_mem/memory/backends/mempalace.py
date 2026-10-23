@@ -1903,6 +1903,9 @@ class MemPalaceBackend:
     def edges_for(self, block_id: str) -> list[MemoryEdgeRecord]:
         return self._index.edges_for(block_id)
 
+    def edges_between(self, record_ids: tuple[str, ...], *, limit: int) -> list[MemoryEdgeRecord]:
+        return self._index.edges_between(record_ids, limit=limit)
+
     def export_edges(self) -> list[MemoryEdgeRecord]:
         return self._index.export_edges()
 

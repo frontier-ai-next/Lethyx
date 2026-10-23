@@ -68,6 +68,7 @@ def provider_tool_schemas(
                     "block_id": {"type": "string", "minLength": 1},
                     "limit": {"type": "integer", "minimum": 1, "maximum": 200, "default": 50},
                     "cursor": {"type": "string", "default": ""},
+                    "related_cursor": {"type": "string", "default": ""},
                 },
                 "required": ["block_id"],
                 "additionalProperties": False,

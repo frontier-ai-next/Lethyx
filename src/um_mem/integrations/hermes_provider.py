@@ -3680,7 +3680,7 @@ class UmMemMemoryProvider(MemoryProvider):
         definitions = {
             "um_mem_provider_navigation_envelope": (
                 "navigation_envelope",
-                {"block_id", "limit", "cursor"},
+                {"block_id", "limit", "cursor", "related_cursor"},
                 ("block_id",),
             ),
             "um_mem_provider_create_block": (

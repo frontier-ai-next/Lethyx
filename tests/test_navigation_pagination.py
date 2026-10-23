@@ -1,3 +1,7 @@
+import json
+import time
+from uuid import uuid4
+
 import pytest
 
 from um_mem import MemoryClient
@@ -47,6 +51,8 @@ def test_pages_cover_children_once_and_keep_branch_semantics(tmp_path, monkeypat
         compact = compact_response("expand_block", {"ok": True, **page})
         assert compact["next_cursor"] == page["next_cursor"]
         assert compact["catalog_revision"] == page["catalog_revision"]
+        assert compact["related_edges_scope"] == page["related_edges_scope"]
+        assert compact["related_edges_truncated"] is page["related_edges_truncated"]
         assert compact["children"][0]["child_count"] == 1
         cursor = page["next_cursor"]
         if not cursor:
@@ -152,3 +158,82 @@ def test_deep_map_budget_discloses_unexpanded_branches(tmp_path):
         nodes.extend(node.get("children", []))
     assert len(seen) <= 201
     assert any(node["child_count"] and node["next_cursor"] for node in seen)
+
+
+def test_navigation_envelope_bounds_dense_internal_and_external_edges(tmp_path):
+    from um_mem.memory.catalog_store import WorkspaceCatalogStore
+
+    client, _root, branch, children = _tree(tmp_path, count=10)
+    store = WorkspaceCatalogStore(tmp_path, "pages", "default")
+    try:
+        now = "2026-10-23T00:00:00+00:00"
+        visible_ids = [branch["block_id"], *(child["block_id"] for child in children)]
+        rows = []
+        for src in visible_ids:
+            for dst in visible_ids:
+                if src == dst:
+                    continue
+                rows.append(
+                    (
+                        str(uuid4()),
+                        "pages",
+                        "default",
+                        src,
+                        dst,
+                        "related_to",
+                        "dense visible edge",
+                        1,
+                        now,
+                    )
+                )
+        rows.extend(
+            (
+                str(uuid4()),
+                "pages",
+                "default",
+                branch["block_id"],
+                f"external-{index:05d}",
+                "related_to",
+                "external edge",
+                1,
+                now,
+            )
+            for index in range(20_000)
+        )
+        rows.append(
+            (
+                str(uuid4()),
+                "pages",
+                "other-profile",
+                visible_ids[0],
+                visible_ids[1],
+                "related_to",
+                "foreign profile edge",
+                1,
+                now,
+            )
+        )
+        store._conn.executemany(
+            "INSERT INTO topology_edges(edge_id,workspace_id,profile_id,src_id,dst_id,"
+            "edge_type,reason,revision,created_at) VALUES(?,?,?,?,?,?,?,?,?)",
+            rows,
+        )
+        store._conn.commit()
+        started = time.perf_counter()
+        result = client.navigation_envelope(branch["block_id"], limit=10)
+        elapsed = time.perf_counter() - started
+    finally:
+        store.close()
+
+    encoded = json.dumps(result, separators=(",", ":")).encode("utf-8")
+    assert len(result["children"]) == 10
+    assert result["related_edges_truncated"] is True
+    assert result["block"]["related_edges_truncated"] is True
+    assert result["related_count"] == 20_020
+    assert result["related_next_cursor"]
+    assert len(encoded) < 100_000
+    assert elapsed < 5.0
+    compact = compact_response("navigation_envelope", result)
+    assert compact["related_edges_truncated"] is True
+    assert compact["related_edges_scope"] == result["related_edges_scope"]
+    assert compact["block"]["related_edges_truncated"] is True

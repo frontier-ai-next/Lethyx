@@ -204,8 +204,10 @@ def test_default_memory_blocks_form_a_consistent_hierarchical_index(tmp_path: Pa
         "project_resources",
         "code_resources",
         "stable_project_facts",
+        "project_scope_stable_project_facts",
         "mutable_project_state",
         "decisions_and_contracts",
+        "project_scope_decisions_and_contracts",
         "artifact_claims",
         "workspace_episodes",
     }

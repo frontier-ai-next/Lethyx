@@ -16,6 +16,9 @@ server.registerTool("transition_active_mask", { inputSchema: {} }, () => {
   return result({ ok: true });
 });
 server.registerTool("resolve_active_mask", { inputSchema: { max_tokens: z.number().optional() } }, () => {
+  if (!process.env.UM_MEM_PROJECT_ID || process.env.UM_MEM_ACTIVE_SCOPE_PROJECT_ONLY !== "1") {
+    return result({ ok: false, error: "project scope missing" });
+  }
   if (value === "FAIL") return result({ ok: false, error: "fixture outage" });
   return result({ ok: true, lease: { rendered_context: value, trace: { resolution_status: value ? "resolved" : "not_found" } } });
 });

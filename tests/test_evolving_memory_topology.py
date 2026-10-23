@@ -156,6 +156,10 @@ def test_typed_block_edges_fail_closed_across_profiles(tmp_path: Path) -> None:
     )
     assert edge["edge_type"] == "supports"
     assert alpha.related_blocks(left["block_id"])[0]["block_id"] == right["block_id"]
+    related_page = alpha.related_blocks_page(left["block_id"])
+    assert related_page["related_blocks"][0]["block_id"] == right["block_id"]
+    assert related_page["related_count"] == 1
+    assert related_page["related_next_cursor"] == ""
 
     foreign = beta.create_leaf_block(
         name="Foreign",
@@ -230,6 +234,65 @@ def test_navigation_envelope_preserves_timestamp_freshness(tmp_path: Path) -> No
         assert envelope["health_hints"]["freshness"] == envelope["block"]["freshness"]
     finally:
         backend.close()
+
+
+def test_navigation_envelope_pages_dense_graph_edges_with_scope_and_revision(
+    tmp_path: Path,
+) -> None:
+    client = MemoryClient(tmp_path, workspace_id="alpha", backend_instance=object())
+    root_id = client.block_map()[0]["block_id"]
+    source = client.create_index_block(
+        name="Graph source", synopsis="Dense graph page source.", parent_id=root_id, reason="test"
+    )
+    targets = [
+        client.create_leaf_block(
+            name=f"Graph target {index}",
+            synopsis="Related target.",
+            parent_id=source["block_id"],
+            reason="test",
+        )
+        for index in range(5)
+    ]
+    for target in targets:
+        client.add_block_edge(
+            source["block_id"], target["block_id"], edge_type="related_to", reason="test"
+        )
+
+    first = client.navigation_envelope(source["block_id"], limit=2)
+    assert len(first["related_blocks"]) == 2
+    assert first["related_count"] == 5
+    assert first["related_next_cursor"]
+    assert first["next_cursor"]
+    with pytest.raises(ValueError, match="scope"):
+        client.navigation_envelope(source["block_id"], limit=2, related_cursor=first["next_cursor"])
+    second = client.navigation_envelope(
+        source["block_id"], limit=2, related_cursor=first["related_next_cursor"]
+    )
+    third = client.navigation_envelope(
+        source["block_id"], limit=2, related_cursor=second["related_next_cursor"]
+    )
+    ids = [row["block_id"] for page in (first, second, third) for row in page["related_blocks"]]
+    assert len(ids) == 5
+    assert set(ids) == {target["block_id"] for target in targets}
+    assert third["related_next_cursor"] == ""
+
+    added = client.create_leaf_block(
+        name="Later graph target",
+        synopsis="Invalidates graph page cursors.",
+        parent_id=root_id,
+        reason="test",
+    )
+    client.add_block_edge(
+        source["block_id"], added["block_id"], edge_type="related_to", reason="test"
+    )
+    with pytest.raises(ValueError, match="revision changed"):
+        client.related_blocks_page(source["block_id"], cursor=first["related_next_cursor"])
+
+    other_profile = MemoryClient(
+        tmp_path, workspace_id="alpha", profile_id="other", backend_instance=object()
+    )
+    with pytest.raises(ValueError, match="scope"):
+        other_profile.related_blocks_page(source["block_id"], cursor=first["related_next_cursor"])
 
 
 @pytest.mark.parametrize("backend_type", [MemPalaceBackend, MnemosyneBackend])

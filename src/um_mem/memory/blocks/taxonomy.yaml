@@ -84,3 +84,23 @@
     temperature: warm
     delivery_policy: reflection_only
     retention: durable
+  project_scope_stable_project_facts:
+    kinds: [project_fact, fact]
+    temperature: warm
+    delivery_policy: on_demand
+    retention: durable
+  project_scope_decisions_and_contracts:
+    kinds: [decision, architecture_decision, contract, project_contract]
+    temperature: warm
+    delivery_policy: on_demand
+    retention: durable
+  project_scope_project_ideas:
+    kinds: [idea, hypothesis, research_lead]
+    temperature: cold
+    delivery_policy: reflection_only
+    retention: durable
+  project_scope_reflection_candidates:
+    kinds: [reflection_candidate, reflection]
+    temperature: warm
+    delivery_policy: reflection_only
+    retention: durable

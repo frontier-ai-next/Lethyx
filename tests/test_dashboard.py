@@ -295,6 +295,326 @@ def test_snapshot_cursor_precedes_concurrent_commit():
     assert panel.feed.since(snapshot["cursor"])[1][0]["operation"] == "amend"
 
 
+def _panel_record(record_id: str) -> SimpleNamespace:
+    return SimpleNamespace(
+        block_id=record_id,
+        revision_id=f"revision:{record_id}",
+        revision_of=None,
+        title=f"Record {record_id}",
+        content="x" * 240,
+        kind="fact",
+        status="accepted",
+        recorded_at="2026-10-23T00:00:00+00:00",
+        block_membership=SimpleNamespace(primary_block_id="topic-1"),
+        tags=(),
+        authority="advisory",
+    )
+
+
+def _panel_for_records(records, edges_by_record, catalog=None):
+    def edges_between(record_ids, *, limit):
+        visible = set(record_ids)
+        unique = {}
+        for record_id in sorted(visible):
+            for edge in edges_by_record.get(record_id, ()):
+                if edge.src_id in visible and edge.dst_id in visible:
+                    unique[(edge.src_id, edge.dst_id, edge.edge_type)] = edge
+        return list(unique.values())[:limit]
+
+    client = SimpleNamespace(
+        workspace_id="ws",
+        profile_id="profile-a",
+        backend=SimpleNamespace(edges_between=edges_between),
+        catalog_snapshot=lambda **_: (
+            catalog or {"blocks": [], "edges": [], "edges_truncated": False}
+        ),
+        recent_records=lambda **_: records,
+    )
+    runtime = SimpleNamespace(
+        client=client,
+        identity=SimpleNamespace(backend="test"),
+        _leases_lock=threading.Lock(),
+        _leases={},
+        _expire_leases=lambda: None,
+        health=lambda: {"ok": True},
+    )
+    return dashboard.Dashboard(runtime)
+
+
+def test_snapshot_includes_only_evidence_backed_edges_between_visible_records():
+    from um_mem.contracts import EvidenceRef
+    from um_mem.memory.backends.contracts import MemoryEdgeRecord
+
+    records = [_panel_record(f"record-{index}") for index in range(3)]
+    evidence = EvidenceRef(
+        ref_type="test_run", ref_id="pytest:focused", produced_by="agent", producer_id="pytest"
+    )
+    valid = MemoryEdgeRecord(
+        src_id="record-0",
+        dst_id="record-1",
+        edge_type="supports",
+        workspace_id="ws",
+        reason="Same reproduced parser failure.",
+        weight=0.8,
+        evidence_refs=(evidence,),
+    )
+    no_evidence = MemoryEdgeRecord(
+        src_id="record-1", dst_id="record-2", edge_type="related_to", workspace_id="ws"
+    )
+    foreign = MemoryEdgeRecord(
+        src_id="record-0",
+        dst_id="record-2",
+        edge_type="supports",
+        workspace_id="another-workspace",
+        evidence_refs=(evidence,),
+    )
+    edges = {
+        "record-0": [valid, foreign],
+        "record-1": [valid, no_evidence],
+        "record-2": [no_evidence, foreign],
+    }
+
+    snapshot = _panel_for_records(records, edges).snapshot()
+
+    assert snapshot["record_edges"] == [
+        {
+            "src_id": "record-0",
+            "dst_id": "record-1",
+            "edge_type": "supports",
+            "reason": "Same reproduced parser failure.",
+            "reason_truncated": False,
+            "weight": 0.8,
+            "evidence_refs": [
+                {
+                    "ref_type": "test_run",
+                    "ref_id": "pytest:focused",
+                    "hash": "",
+                    "produced_by": "agent",
+                    "producer_id": "pytest",
+                }
+            ],
+            "evidence_ref_count": 1,
+            "evidence_refs_truncated": False,
+        }
+    ]
+    assert snapshot["record_edges_truncated"] is False
+    assert snapshot["record_graph_scope"] == "recent_records"
+    json.loads(json.dumps(snapshot))
+
+
+def test_snapshot_caps_dense_record_graph_json():
+    from um_mem.contracts import EvidenceRef
+    from um_mem.memory.backends.contracts import MemoryEdgeRecord
+
+    records = [_panel_record(f"record-{index:03d}") for index in range(64)]
+    adjacency = {record.block_id: [] for record in records}
+    evidence = tuple(
+        EvidenceRef(
+            ref_type="test_run",
+            ref_id=f"pytest:dense-graph:{index}:" + "r" * 500,
+            hash="h" * 500,
+            produced_by="agent",
+            producer_id="pytest-" + "p" * 500,
+        )
+        for index in range(4)
+    )
+    for index, source in enumerate(records):
+        for target in records[index + 1 :]:
+            edge = MemoryEdgeRecord(
+                src_id=source.block_id,
+                dst_id=target.block_id,
+                edge_type="supports",
+                workspace_id="ws",
+                reason="Shared test evidence.",
+                evidence_refs=evidence,
+            )
+            adjacency[source.block_id].append(edge)
+            adjacency[target.block_id].append(edge)
+
+    snapshot = _panel_for_records(records, adjacency).snapshot()
+    encoded = json.dumps(snapshot, separators=(",", ":")).encode("utf-8")
+
+    assert 0 < len(snapshot["record_edges"]) < 128
+    assert snapshot["record_edges_truncated"] is True
+    assert snapshot["record_graph_scope_limit"] == 64
+    assert snapshot["record_graph_edge_limit"] == 128
+    assert snapshot["record_graph_edge_byte_limit"] == 64 * 1024
+    assert len(json.dumps(snapshot["record_edges"]).encode("utf-8")) <= 64 * 1024
+    assert len(encoded) < 100_000
+
+
+def test_snapshot_marks_bounded_catalog_edge_preview():
+    snapshot = _panel_for_records(
+        [],
+        {},
+        {"blocks": [], "edges": [{"src_id": "a", "dst_id": "b"}], "edges_truncated": True},
+    ).snapshot()
+
+    assert snapshot["block_edges_truncated"] is True
+    assert snapshot["block_edge_limit"] == 128
+
+
+def test_panel_project_scope_is_exact_for_snapshot_and_record_pages():
+    calls = {}
+
+    def recent_records(**kwargs):
+        calls["recent"] = kwargs
+        return []
+
+    def list_records(**kwargs):
+        calls["list"] = kwargs
+        return {"records": [], "next_cursor": "next"}
+
+    client = SimpleNamespace(
+        workspace_id="ws",
+        profile_id="profile-a",
+        backend=SimpleNamespace(edges_between=lambda *_args, **_kwargs: []),
+        catalog_snapshot=lambda **_: {"blocks": [], "edges": [], "edges_truncated": False},
+        recent_records=recent_records,
+        list_records=list_records,
+        read_exact_records=lambda _ids: [],
+    )
+    runtime = SimpleNamespace(
+        client=client,
+        identity=SimpleNamespace(backend="test"),
+        _leases_lock=threading.Lock(),
+        _leases={},
+        _expire_leases=lambda: None,
+        health=lambda: {"ok": True},
+    )
+    panel = dashboard.Dashboard(runtime)
+    selected_id = "group/one?x=1&y=2"
+
+    snapshot = panel.snapshot(scope="project", scope_id=selected_id)
+    records = panel.records("", "", scope="project", scope_id=selected_id)
+
+    assert snapshot["record_scope"] == "project"
+    assert snapshot["record_scope_id"] == selected_id
+    assert calls["recent"]["scope"] == "project"
+    assert calls["recent"]["scope_id"] == selected_id
+    assert calls["list"]["scope"] == "project"
+    assert calls["list"]["scope_id"] == selected_id
+    assert records["next_cursor"] == "next"
+    with pytest.raises(ValueError, match="exact project scope ID"):
+        panel.records("", "", scope="project", scope_id=" ")
+    with pytest.raises(ValueError, match="does not match"):
+        panel.snapshot(scope="workspace", scope_id="other")
+
+
+def test_project_record_list_discloses_recent_only_fallback_after_snapshot_cap():
+    calls = {}
+    records = [_panel_record(f"recent-{index}") for index in range(3)]
+
+    def list_records(**kwargs):
+        calls["list"] = kwargs
+        raise ValueError("list_records scope exceeds 2048 records; select a narrower scope")
+
+    def recent_records(**kwargs):
+        calls["recent"] = kwargs
+        return records
+
+    client = SimpleNamespace(
+        workspace_id="ws",
+        profile_id="profile-a",
+        list_records=list_records,
+        recent_records=recent_records,
+        read_exact_records=lambda _ids: [],
+    )
+    runtime = SimpleNamespace(client=client)
+    panel = dashboard.Dashboard(runtime)
+
+    result = panel.records("", "", scope="project", scope_id="project-a")
+
+    assert result["scope_limited"] is True
+    assert result["scope_limit"] == 2048
+    assert result["recent_limit"] == 64
+    assert result["next_cursor"] == ""
+    assert calls["recent"]["scope"] == "project"
+    assert calls["recent"]["scope_id"] == "project-a"
+
+
+def test_sqlite_edges_between_bounds_results_and_scopes_workspace(tmp_path):
+    from um_mem.memory.backends.sqlite_index import BackendSQLiteIndex
+
+    database = tmp_path / "graph.sqlite"
+    backend = BackendSQLiteIndex(database, backend_id="test", workspace_id="ws")
+    try:
+
+        def insert_edge(selected_backend, src, dst, edge_type="supports", *, evidence=True):
+            payload = json.dumps(
+                {
+                    "src_id": src,
+                    "dst_id": dst,
+                    "edge_type": edge_type,
+                    "workspace_id": selected_backend.workspace_id,
+                    "reason": "evidence",
+                    "weight": 0.8,
+                    "evidence_refs": [
+                        {
+                            "ref_type": "test_run",
+                            "ref_id": "pytest:bounded-edges",
+                            "produced_by": "agent",
+                            "producer_id": "panel-test",
+                        }
+                    ]
+                    if evidence
+                    else [],
+                    "metadata": {},
+                }
+            )
+            selected_backend._conn.execute(
+                "INSERT INTO edges(src_id,dst_id,edge_type,workspace_id,payload_json) "
+                "VALUES(?,?,?,?,?)",
+                (src, dst, edge_type, selected_backend.workspace_id, payload),
+            )
+
+        insert_edge(backend, "visible-a", "visible-b")
+        insert_edge(backend, "visible-a", "visible-b", "aaa", evidence=False)
+        insert_edge(backend, "visible-a", "outside-record")
+        for index in range(200):
+            insert_edge(backend, "visible-a", f"outside-{index:03d}")
+        foreign_payload = json.dumps(
+            {
+                "src_id": "visible-a",
+                "dst_id": "visible-b",
+                "edge_type": "supports",
+                "workspace_id": "other",
+                "reason": "foreign",
+                "weight": 1.0,
+                "evidence_refs": [
+                    {
+                        "ref_type": "test_run",
+                        "ref_id": "foreign",
+                        "produced_by": "agent",
+                        "producer_id": "foreign-test",
+                    }
+                ],
+                "metadata": {},
+            }
+        )
+        backend._conn.execute(
+            "INSERT INTO edges(src_id,dst_id,edge_type,workspace_id,payload_json) "
+            "VALUES(?,?,?,?,?)",
+            ("visible-a", "visible-b", "supports", "other", foreign_payload),
+        )
+        backend._conn.commit()
+
+        edges = backend.edges_between(("visible-a", "visible-b"), limit=129)
+        plan = backend._conn.execute(
+            "EXPLAIN QUERY PLAN SELECT payload_json FROM edges "
+            "WHERE workspace_id=? AND src_id IN (?,?) AND dst_id IN (?,?) "
+            "AND json_array_length(payload_json, '$.evidence_refs') > 0 "
+            "ORDER BY src_id,dst_id,edge_type LIMIT ?",
+            ("ws", "visible-a", "visible-b", "visible-a", "visible-b", 129),
+        ).fetchall()
+        assert [(edge.src_id, edge.dst_id) for edge in edges] == [("visible-a", "visible-b")]
+        assert [edge.edge_type for edge in edges] == ["supports"]
+        assert any("sqlite_autoindex_edges_1" in str(row) for row in plan)
+        assert not any("TEMP B-TREE" in str(row).upper() for row in plan)
+    finally:
+        backend.close()
+
+
 def test_correction_compares_expected_source_inside_dispatch(tmp_path):
     from um_mem import MemoryClient
     from um_mem.memory.backends.contracts import CanonicalHeadConflict

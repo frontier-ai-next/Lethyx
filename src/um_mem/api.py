@@ -1751,13 +1751,18 @@ class MemoryClient:
         root_blocks.sort(key=lambda block: (block.block_id not in states_by_id, block.name))
         return [view(block, (block.block_id,)) for block in root_blocks]
 
-    def catalog_snapshot(self) -> dict[str, Any]:
+    def catalog_snapshot(self, *, edge_limit: int | None = None) -> dict[str, Any]:
         """Return one bounded-consumer snapshot without per-block database scans."""
 
+        if edge_limit is not None and (type(edge_limit) is not int or not 1 <= edge_limit <= 128):
+            raise ValueError("catalog edge limit must be an integer from 1 to 128")
         store = WorkspaceCatalogStore(self.repo_root, self.workspace_id, self.profile_id)
         try:
             states = store.list_blocks()
-            edges = store.list_edges()
+            edges = store.list_edges(limit=edge_limit + 1 if edge_limit is not None else None)
+            edges_truncated = edge_limit is not None and len(edges) > edge_limit
+            if edges_truncated:
+                edges = edges[:edge_limit]
             revision = store.catalog_revision()
         finally:
             store.close()
@@ -1806,24 +1811,29 @@ class MemoryClient:
             path = paths.get(block.block_id, ())
             if not path:
                 raise RuntimeError("catalog block is not reachable from a visible root")
-            views.append(
-                self._block_catalog_view(
-                    block,
-                    descriptors[block.block_id],
-                    include_index_state=True,
-                    path=path,
-                    child_ids=child_ids_by_parent[block.block_id],
-                    topology_state=states_by_id[block.block_id],
-                    related_block_ids=related_for(block.block_id),
-                    native_partitions=tuple(partitions_by_block.get(block.block_id, ())),
-                    block_metrics=tuple(metrics_by_block.get(block.block_id, ())),
-                )
+            view = self._block_catalog_view(
+                block,
+                descriptors[block.block_id],
+                include_index_state=True,
+                path=path,
+                child_ids=child_ids_by_parent[block.block_id],
+                topology_state=states_by_id[block.block_id],
+                related_block_ids=related_for(block.block_id),
+                native_partitions=tuple(partitions_by_block.get(block.block_id, ())),
+                block_metrics=tuple(metrics_by_block.get(block.block_id, ())),
             )
-        return {
+            if edge_limit is not None:
+                view["related_block_ids_complete"] = not edges_truncated
+            views.append(view)
+        result = {
             "catalog_revision": revision,
             "blocks": views,
             "edges": [edge.to_mapping() for edge in edges],
         }
+        if edge_limit is not None:
+            result["edges_truncated"] = edges_truncated
+            result["edge_limit"] = edge_limit
+        return result
 
     def expand_block(self, block_id: str, *, limit: int = 50, cursor: str = "") -> dict[str, Any]:
         selected_id = str(block_id or "").strip()
@@ -1832,6 +1842,17 @@ class MemoryClient:
             navigation = store.navigation(
                 block_id=selected_id, depth=2, include_edges=True, child_limit=limit, cursor=cursor
             )
+            root_edges, _, root_edge_cursor, _ = store.edge_page(
+                selected_id, limit=limit, cursor="", expected_revision=navigation.catalog_revision
+            )
+            child_edge_previews: dict[str, tuple[BlockGraphEdge, ...]] = {}
+            child_edge_cursors: dict[str, str] = {}
+            for child_id in navigation.child_ids.get(selected_id, ())[:16]:
+                preview, _, next_cursor, _ = store.edge_page(
+                    child_id, limit=8, cursor="", expected_revision=navigation.catalog_revision
+                )
+                child_edge_previews[child_id] = tuple(preview)
+                child_edge_cursors[child_id] = next_cursor
         finally:
             store.close()
         states = navigation.states
@@ -1927,10 +1948,14 @@ class MemoryClient:
             )
 
         def related_for(block_id: str) -> tuple[str, ...]:
+            edge_rows = edges_by_block.get(block_id, ())
+            if block_id == selected_id:
+                edge_rows = (*edge_rows, *root_edges)
+            else:
+                edge_rows = (*edge_rows, *child_edge_previews.get(block_id, ()))
             return tuple(
                 dict.fromkeys(
-                    edge.dst_id if edge.src_id == block_id else edge.src_id
-                    for edge in edges_by_block.get(block_id, ())
+                    edge.dst_id if edge.src_id == block_id else edge.src_id for edge in edge_rows
                 )
             )
 
@@ -1947,6 +1972,32 @@ class MemoryClient:
                 related_block_ids=related_for(block.block_id),
                 native_partitions=partitions_for(block.block_id),
                 block_metrics=metrics_for(block.block_id),
+            )
+            payload["related_block_ids_scope"] = (
+                "root_edge_page_and_page_children"
+                if block.block_id == selected_id
+                else (
+                    "child_edge_page"
+                    if block.block_id in child_edge_previews
+                    else "visible_subgraph_only"
+                )
+            )
+            payload["related_block_ids_complete"] = (
+                not root_edge_cursor and not navigation.edges_truncated
+                if block.block_id == selected_id
+                else block.block_id in child_edge_previews
+                and not child_edge_cursors[block.block_id]
+            )
+            payload["related_edges_truncated"] = bool(
+                root_edge_cursor
+                or navigation.edges_truncated
+                or (
+                    block.block_id != selected_id
+                    and (
+                        block.block_id not in child_edge_previews
+                        or child_edge_cursors[block.block_id]
+                    )
+                )
             )
             payload["diagnostics_status"] = str(health_payload.get("readiness") or "unknown")
             payload["metrics_scope"] = str(health_payload.get("metrics_scope") or "unknown")
@@ -1970,6 +2021,10 @@ class MemoryClient:
             "next_cursor": cursors[selected_id],
             "root": expanded_view(selected, path_ids),
             "children": [expanded_view(child, (*path_ids, child.block_id)) for child in children],
+            "related_edges_scope": "root_edge_page_and_page_children",
+            "related_edges_truncated": bool(root_edge_cursor or navigation.edges_truncated),
+            "related_edges_limit": 128,
+            "root_related_next_cursor": root_edge_cursor,
         }
 
     def _create_block(
@@ -3017,6 +3072,13 @@ class MemoryClient:
         finally:
             store.close()
 
+    def related_blocks_page(
+        self, block_id: str, *, limit: int = 50, cursor: str = ""
+    ) -> dict[str, Any]:
+        """Read one bounded graph page; use this for dense relation sets."""
+
+        return self._related_blocks_page(block_id, limit=limit, cursor=cursor)
+
     def block_path(self, block_id: str) -> list[str]:
         return list(self.expand_block(block_id)["path_ids"])
 
@@ -3059,11 +3121,22 @@ class MemoryClient:
             store.close()
 
     def navigation_envelope(
-        self, block_id: str, *, limit: int = 50, cursor: str = ""
+        self,
+        block_id: str,
+        *,
+        limit: int = 50,
+        cursor: str = "",
+        related_cursor: str = "",
     ) -> dict[str, Any]:
         """Return content-free navigation, health, and advisory maintenance facts."""
 
         expanded = self.expand_block(block_id, limit=limit, cursor=cursor)
+        related_page = self._related_blocks_page(
+            block_id,
+            limit=limit,
+            cursor=related_cursor,
+            expected_revision=int(expanded["catalog_revision"]),
+        )
         block = dict(expanded["root"])
         observations = self.maintenance_observations(block_id)
         proposal_by_observation = {
@@ -3093,7 +3166,12 @@ class MemoryClient:
             "child_count": expanded["child_count"],
             "block": block,
             "children": list(expanded["children"]),
-            "related_blocks": self.related_blocks(block_id),
+            "related_blocks": related_page["related_blocks"],
+            "related_count": related_page["related_count"],
+            "related_next_cursor": related_page["related_next_cursor"],
+            "related_edges_scope": expanded["related_edges_scope"],
+            "related_edges_truncated": expanded["related_edges_truncated"],
+            "related_edges_limit": expanded["related_edges_limit"],
             "health_hints": {
                 "native_partitions": list(block.get("native_partitions") or ()),
                 "block_metrics": list(block.get("block_metrics") or ()),
@@ -3103,6 +3181,37 @@ class MemoryClient:
             "proposal_options": proposal_options,
             "mutation_performed": False,
         }
+
+    def _related_blocks_page(
+        self,
+        block_id: str,
+        *,
+        limit: int,
+        cursor: str,
+        expected_revision: int | None = None,
+    ) -> dict[str, Any]:
+        store = WorkspaceCatalogStore(self.repo_root, self.workspace_id, self.profile_id)
+        try:
+            edges, count, next_cursor, revision = store.edge_page(
+                block_id,
+                limit=limit,
+                cursor=cursor,
+                expected_revision=expected_revision,
+            )
+            related: list[dict[str, Any]] = []
+            for edge in edges:
+                other_id = edge.dst_id if edge.src_id == block_id else edge.src_id
+                state = store.get_block(other_id)
+                if state is not None:
+                    related.append({**state.to_mapping(), "edge": edge.to_mapping()})
+            return {
+                "related_blocks": related,
+                "related_count": count,
+                "related_next_cursor": next_cursor,
+                "catalog_revision": revision,
+            }
+        finally:
+            store.close()
 
     def get_active_mask(self, mask_id: str = "") -> ActiveMemoryMask | None:
         store = WorkspaceCatalogStore(self.repo_root, self.workspace_id, self.profile_id)
@@ -3402,6 +3511,7 @@ class MemoryClient:
         mask_id: str = "",
         expected_revision: int | None = None,
         max_tokens: int | None = None,
+        scope_chain: tuple[str, ...] | None = None,
     ) -> ActivationLease:
         if expected_revision is not None and (
             isinstance(expected_revision, bool)
@@ -3413,6 +3523,14 @@ class MemoryClient:
             isinstance(max_tokens, bool) or not isinstance(max_tokens, int) or max_tokens < 0
         ):
             raise ValueError("active mask token ceiling must be non-negative")
+        effective_scope_chain = (
+            bind_scope_chain(self._active_scope_lineage(), scope_chain)
+            if scope_chain is not None
+            else None
+        )
+        allowed_scope_keys = (
+            set(effective_scope_chain) if effective_scope_chain is not None else None
+        )
         mask = self.get_active_mask(mask_id)
         if mask is None:
             return self._active_lease(
@@ -3481,6 +3599,7 @@ class MemoryClient:
             store.close()
         get_block = getattr(self.backend, "get_block", None)
         record_ids_for_blocks = getattr(self.backend, "record_ids_for_logical_blocks", None)
+        scoped_record_ids = getattr(self.backend, "scoped_record_ids", None)
         validate_dependencies = getattr(self.backend, "validate_dependencies", None)
         if (
             not callable(get_block)
@@ -3508,6 +3627,7 @@ class MemoryClient:
                     limit=selector.limit,
                     include_candidates=True,
                     logical_block_ids=(selector.block_id,),
+                    scope_chain=effective_scope_chain,
                 )
                 record_ids.extend(
                     str(hit.metadata.get("block_id") or "")
@@ -3515,12 +3635,24 @@ class MemoryClient:
                     if str(hit.metadata.get("block_id") or "")
                 )
                 continue
-            candidates = list(
-                record_ids_for_blocks(
-                    (selector.block_id,),
-                    workspace_id=self.workspace_id,
+            if effective_scope_chain is not None and callable(scoped_record_ids):
+                candidates = [
+                    record_id
+                    for scope_key in effective_scope_chain
+                    for record_id in scoped_record_ids(
+                        workspace_id=self.workspace_id,
+                        profile_id=self.profile_id,
+                        scope_key=scope_key,
+                        logical_block_id=selector.block_id,
+                    )
+                ]
+            else:
+                candidates = list(
+                    record_ids_for_blocks(
+                        (selector.block_id,),
+                        workspace_id=self.workspace_id,
+                    )
                 )
-            )
             if selector.selector_type == "working_state":
                 candidates = [
                     record_id
@@ -3530,6 +3662,9 @@ class MemoryClient:
                         MemoryBlockRecord,
                     )
                     and record.profile_id == self.profile_id
+                    and (
+                        allowed_scope_keys is None or memory_scope_key(record) in allowed_scope_keys
+                    )
                     and record.delivery_policy == "working_set"
                     and (
                         not selector.working_state_id
@@ -3545,6 +3680,9 @@ class MemoryClient:
                         MemoryBlockRecord,
                     )
                     and record.profile_id == self.profile_id
+                    and (
+                        allowed_scope_keys is None or memory_scope_key(record) in allowed_scope_keys
+                    )
                 ]
                 typed.sort(
                     key=lambda record: (
@@ -3580,6 +3718,11 @@ class MemoryClient:
                     edges_for=edges_for if callable(edges_for) else None,
                 )
             if not isinstance(record, MemoryBlockRecord) or record.status in excluded:
+                continue
+            if (
+                allowed_scope_keys is not None
+                and memory_scope_key(record) not in allowed_scope_keys
+            ):
                 continue
             dependency_check = validate_dependencies(
                 record.block_id, workspace_id=self.workspace_id, profile_id=self.profile_id

@@ -1,6 +1,7 @@
 const $ = id => document.getElementById(id);
-const state = {snapshot:null, records:[], browseRecords:[], block:'', cursor:'', view:'memory', mode:'graph',
+const state = {snapshot:null, records:[], browseRecords:[], block:'', cursor:'', scope:{scope:'workspace',scopeId:''}, view:'memory', mode:'graph',
   selected:'', detail:null, draft:null, query:'', events:[], positions:{},
+  scopeLimited:false,
   transform:{x:0,y:0,k:1}, source:null, refreshing:false, pending:false, detailRequest:0,
   searchRequest:0, toastTimer:0, selectedTopic:'', fitNeeded:true, stopped:false};
 const statusNames = {candidate:'Не проверено',accepted:'Подтверждено',active:'Действует',
@@ -24,6 +25,45 @@ function badge(status) {return element('span',`badge ${status}`,statusNames[stat
 function date(value) {const d=new Date(value); return isNaN(d)?'Без даты':d.toLocaleString('ru',{day:'numeric',month:'short',hour:'2-digit',minute:'2-digit'});}
 function flatten(nodes, out=[]) {for(const n of nodes||[]){out.push(n);flatten(n.children,out);}return out;}
 function topic(id) {return flatten(state.snapshot?.tree).find(n=>n.block_id===id);}
+function scopeLabel(scope=state.scope) {
+  if(scope.scope!=='project')return 'Общая память';
+  const id=scope.scopeId||'';
+  return `Проект ${id.length>24?id.slice(0,10)+'…'+id.slice(-8):id}`;
+}
+function scopeQuery() {
+  const params=new URLSearchParams({scope:state.scope.scope});
+  if(state.scope.scope==='project')params.set('scope_id',state.scope.scopeId);
+  return params.toString();
+}
+function recordsUrl(block,cursor) {
+  const params=new URLSearchParams({scope:state.scope.scope,block:block||'',cursor:cursor||''});
+  if(state.scope.scope==='project')params.set('scope_id',state.scope.scopeId);
+  return `api/records?${params}`;
+}
+function renderScopePicker() {
+  if(!state.snapshot)return;
+  const select=$('record-scope'),selected=state.scope.scope==='project'?`project:${state.scope.scopeId}`:'workspace';
+  const projects=new Map();
+  for(const session of state.snapshot.sessions||[])if(session.project_id){
+    const entries=projects.get(session.project_id)||[];entries.push(session.session_id||'session');projects.set(session.project_id,entries);
+  }
+  if(state.scope.scope==='project'&&!projects.has(state.scope.scopeId))projects.set(state.scope.scopeId,[]);
+  select.replaceChildren(new Option('Общая память','workspace'));
+  for(const [id,sessions] of [...projects.entries()].sort(([a],[b])=>a.localeCompare(b))){
+    const provider=sessions.map(id=>id.split(':',1)[0]).filter((v,i,a)=>a.indexOf(v)===i).join(', ');
+    const option=new Option(`${scopeLabel({scope:'project',scopeId:id})}${provider?' · '+provider:''}`,`project:${id}`);
+    option.title=`Точный ID: ${id}`;select.append(option);
+  }
+  select.append(new Option('Другой проект…','manual'));
+  select.value=selected;
+  $('project-scope-form').hidden=select.value!=='manual';
+}
+async function changeScope(scope,scopeId='') {
+  if(!allowLeave()) {renderScopePicker();return;}
+  state.scope={scope,scopeId};state.block='';state.records=[];state.browseRecords=[];state.cursor='';state.query='';
+  $('query').value='';$('search-info').hidden=true;state.detailRequest++;state.draft=null;state.selected='';state.selectedTopic='';$('detail').hidden=true;
+  restoreLayout();await refresh();
+}
 function toast(text) {clearTimeout(state.toastTimer);$('toast').textContent=text;$('toast').hidden=false;state.toastTimer=setTimeout(()=>$('toast').hidden=true,5500);}
 function banner(text='') {$('banner').textContent=text;$('banner').hidden=!text;}
 async function api(path,body) {
@@ -41,6 +81,7 @@ function connected(value) {
 }
 function renderSummary() {
   const s=state.snapshot, nodes=flatten(s.tree).filter(n=>!n.meta);
+  renderScopePicker();
   $('workspace').textContent=s.workspace;$('profile').textContent=`Профиль ${s.profile} · общая память`;
   $('backend').textContent=`${s.backend} · локальный сервис`;
   $('stat-topics').textContent=nodes.filter(n=>n.parent_id).length;
@@ -62,8 +103,10 @@ function renderSummary() {
 }
 function renderRecords() {
   if(!state.query)state.browseRecords=[...state.records];
-  $('collection-title').textContent=state.query?`Результаты поиска`:state.block?(topic(state.block)?.name||'Выбранная тема'):'Последние записи';
-  $('collection-note').textContent=state.query?`${state.records.length} результатов`:state.block?`${state.records.length} записей загружено`:'До 64 последних · остальные внутри тем';
+  $('collection-title').textContent=state.query?`Результаты поиска`:state.block?(topic(state.block)?.name||'Выбранная тема'):`Записи · ${scopeLabel()}`;
+  $('collection-note').textContent=state.scopeLimited
+    ?`Показаны последние 64 записи · ${scopeLabel()}. Выберите тему слева для более узкого списка; поиск охватывает только показанные записи.`
+    :state.query?`${state.records.length} результатов`:state.cursor?`${state.records.length} записей загружено · ${scopeLabel()}`:`${state.records.length} записей · ${scopeLabel()}`;
   const list=$('list');list.replaceChildren();
   if(!state.records.length){const e=element('div','empty');e.append(element('strong','',state.query?'Подходящих записей нет':'Здесь пока нет записей'),
     element('span','',state.query?'Память не нашла достаточно подходящих сведений. Уточните вопрос или выберите другую тему.':'Выберите тему или добавьте первую запись.'));list.append(e);}
@@ -76,7 +119,7 @@ function renderRecords() {
       element('span','',r.score!==undefined?`${r.score_mode==='semantic_cosine'?'Сходство':'Оценка'} ${Number(r.score).toFixed(3)}`:date(r.recorded_at)));
     card.append(top,element('h3','',r.title||'Без названия'),element('p','',r.preview||''),bottom);list.append(card);
   }
-  $('load-more').hidden=!state.cursor||Boolean(state.query);renderGraph();
+  $('load-more').hidden=!state.cursor||(Boolean(state.query)&&state.scope.scope!=='project');renderGraph();
 }
 function renderEvents() {
   const events=[...state.events].reverse();
@@ -117,14 +160,20 @@ async function refresh() {
   if(state.refreshing){state.pending=true;return;}
   state.refreshing=true;
   try {
-    const snapshot=await api('api/snapshot');state.snapshot=snapshot;mergeEvents(snapshot.events,snapshot.cursor);
+    state.scopeLimited=false;
+    const snapshot=await api(`api/snapshot?${scopeQuery()}`);state.snapshot=snapshot;mergeEvents(snapshot.events,snapshot.cursor);
     renderSummary();renderEvents();
     if(state.block) {
       const selected=state.block, count=Math.max(64,state.records.length);let cursor='',records=[];
-      do {const page=await api(`api/records?block=${encodeURIComponent(selected)}&cursor=${encodeURIComponent(cursor)}`);
+      do {const page=await api(recordsUrl(selected,cursor));
+        state.scopeLimited ||=Boolean(page.scope_limited);
         records.push(...page.records);cursor=page.next_cursor;
       }while(cursor&&records.length<count&&selected===state.block);
       if(state.block===selected){state.browseRecords=records;if(!state.query){state.records=records;state.cursor=cursor;}}
+    } else if(state.scope.scope==='project') {
+      const page=await api(recordsUrl('', ''));
+      state.scopeLimited=Boolean(page.scope_limited);
+      state.browseRecords=page.records;if(!state.query){state.records=page.records;state.cursor=page.next_cursor;}
     } else {state.browseRecords=snapshot.records;if(!state.query){state.records=snapshot.records;state.cursor='';}}
     if(state.query)await search(state.query);
     renderRecords();banner();
@@ -144,9 +193,17 @@ async function checkSelected() {
   }catch(error){if(state.selected===id)banner(error.message);}
 }
 async function search(query) {
-  const request=++state.searchRequest;state.query=query.trim();state.cursor='';
+  const request=++state.searchRequest;state.query=query.trim();if(state.scope.scope!=='project')state.cursor='';
   if(!state.query){$('search-info').hidden=true;return refresh();}
   $('search-info').hidden=false;$('search-info').textContent='Ищем по смыслу…';
+  if(state.scope.scope==='project'){
+    const needle=state.query.toLocaleLowerCase();
+    state.records=state.browseRecords.filter(r=>(r.title+' '+(r.preview||'')).toLocaleLowerCase().includes(needle));
+    $('search-info').textContent=state.scopeLimited
+      ?`Поиск только по показанным последним 64 записям: ${scopeLabel()}. Результаты неполные; выберите тему, чтобы сузить область.`
+      :`Поиск по уже загруженным записям: ${scopeLabel()}. Загрузите следующую страницу, чтобы расширить выборку.`;
+    setMode('list');renderRecords();return;
+  }
   try {
     const arguments_={query:state.query,include_candidates:true};if(state.block)arguments_.logical_block_ids=[state.block];
     const data=await api('api/call',{tool:'recall',arguments:arguments_});
@@ -310,8 +367,26 @@ function renderBlockDetail(id){
 let graphNodes=[],graphLinks=[];
 function counted(value,forms){const n=value%100;return value+' '+forms[n>=11&&n<=14?2:value%10===1?0:value%10>=2&&value%10<=4?1:2];}
 function graphModel(){
+  if(state.scope.scope==='project'){
+    const records=state.snapshot?.records||[],nodes=[],links=[],visible=new Set(records.map(r=>r.record_id));
+    records.forEach((r,index)=>{
+      const angle=index/Math.max(records.length,1)*Math.PI*2-Math.PI/2;
+      const radius=records.length>1?Math.min(310,105+records.length*3):0;
+      nodes.push({id:r.record_id,title:r.title||'Без названия',type:'record',color:colorFor(r.logical_block_id||r.record_id),
+        x:550+Math.cos(angle)*radius,y:320+Math.sin(angle)*radius*.62,r:7,subtitle:statusNames[r.status]||r.status||''});
+    });
+    for(const edge of state.snapshot?.record_edges||[]){
+      if(!visible.has(edge.src_id)||!visible.has(edge.dst_id))continue;
+      const evidenceCount=edge.evidence_ref_count||edge.evidence_refs?.length||0;
+      const shownCount=edge.evidence_refs?.length||0;
+      const label=[edge.edge_type,edge.reason,`Подтверждающие источники: ${evidenceCount}`,
+        edge.evidence_refs_truncated?`показано ${shownCount}`:''].filter(Boolean).join(' · ');
+      links.push({source:edge.src_id,target:edge.dst_id,type:'evidence-related',label,color:colorFor(edge.src_id)});
+    }
+    return {nodes,links};
+  }
   const roots=state.snapshot.tree||[], center=topic(state.block)||(roots.length===1?roots[0]:null),children=center?center.children||[]:roots;
-  const nodes=[],links=[],visible=new Set();
+  const nodes=[],links=[],visible=new Set(),visibleRecords=new Set();
   function addBlock(b,x,y,central=false){visible.add(b.block_id);nodes.push({id:b.block_id,title:b.name,type:'block',central,color:colorFor(b.block_id),x,y,r:central?37:27,subtitle:(b.children?.length?counted(b.children.length,['блок','блока','блоков'])+' · ':'')+counted(blockRecordCount(b),['запись','записи','записей'])});}
   if(center)addBlock(center,550,320,true);
   for(const [index,b]of children.entries()){
@@ -328,18 +403,39 @@ function graphModel(){
       const angle=owner.central?(index%perRing)/count*Math.PI*2-(count===2?0:Math.PI/2):baseAngle+(index%perRing-(count-1)/2)*Math.PI*1.35/Math.max(count,2);
       const radius=(owner.central?(children.length?345:185):112)+ring*110;
       nodes.push({id:r.record_id,previous:r.revision_of,title:r.title||'Без названия',type:'record',color:owner.color,x:owner.x+Math.cos(angle)*radius,y:owner.y+Math.sin(angle)*radius,r:7,subtitle:statusNames[r.status]||r.status||''});
+      visibleRecords.add(r.record_id);
       links.push({source:parent,target:r.record_id,type:'membership',color:owner.color});
     });
   }
   for(const edge of state.snapshot.edges||[]){if(visible.has(edge.src_id)&&visible.has(edge.dst_id))links.push({source:edge.src_id,target:edge.dst_id,type:'related',label:edge.relation||edge.edge_type||'Связь блоков'});}
+  for(const edge of state.snapshot.record_edges||[]){
+    if(!visibleRecords.has(edge.src_id)||!visibleRecords.has(edge.dst_id))continue;
+    const evidenceCount=edge.evidence_ref_count||edge.evidence_refs?.length||0;
+    const shownCount=edge.evidence_refs?.length||0;
+    const evidence=`Подтверждающие источники: ${evidenceCount}`+
+      (edge.evidence_refs_truncated?` · показано ${shownCount}`:'');
+    const label=[edge.edge_type,edge.reason,edge.reason_truncated?'описание сокращено':'',evidence]
+      .filter(Boolean).join(' · ');
+    links.push({source:edge.src_id,target:edge.dst_id,type:'evidence-related',label,color:colorFor(edge.src_id)});
+  }
   return {nodes,links};
 }
 function labelLines(title,max=26){const words=title.split(/\s+/),lines=[''];for(const word of words){let i=lines.length-1;if(lines[i].length+word.length+(lines[i]?1:0)>max&&lines[i]){if(lines.length===2){lines[i]=lines[i].slice(0,max-1)+'…';break;}lines.push('');i++;}lines[i]+=(lines[i]?' ':'')+word;}return lines.map(line=>line.length>max?line.slice(0,max-1)+'…':line);}
 function renderGraph(){
   if(!state.snapshot||state.mode!=='graph')return;
+  const help=$('graph-wrap').querySelector('.graph-help');
+  let scopeNote=help.querySelector('.graph-scope-note');
+  if(!scopeNote){scopeNote=element('span','graph-scope-note');help.append(scopeNote);}
+  const recordLimit=state.snapshot.record_graph_scope_limit||state.snapshot.recent_limit||64;
+  const edgeLimit=state.snapshot.record_graph_edge_limit||128;
+  const edgeByteLimit=Math.round((state.snapshot.record_graph_edge_byte_limit||65536)/1024);
+  scopeNote.textContent=`${scopeLabel()} · граф записей по последним ${recordLimit}`+
+    (state.scope.scope==='workspace'&&state.block?' · связи более старых выбранных записей здесь не загружаются':'')+
+    (state.snapshot.record_edges_truncated?` · часть связей скрыта (предел ${edgeLimit} связей / ${edgeByteLimit} КБ)`:'' )+
+    (state.snapshot.block_edges_truncated?` · блоковых связей показано не более ${state.snapshot.block_edge_limit}`:'');
   const viewport=$('graph').getBoundingClientRect();if(viewport.width&&viewport.height)$('graph').setAttribute('viewBox','0 0 '+viewport.width+' '+viewport.height);
   const scene=$('graph-scene');scene.replaceChildren();const model=graphModel();graphNodes=model.nodes;graphLinks=model.links;
-  $('graph-empty').hidden=Boolean(graphNodes.length);$('graph-empty').textContent='Память пока пуста. Создайте первый блок через агента UM-MEM.';
+  $('graph-empty').hidden=Boolean(graphNodes.length);$('graph-empty').textContent=state.scope.scope==='project'?'В выбранном проекте пока нет записей.':`Память пока пуста. Создайте первый блок через агента UM-MEM.`;
   for(const n of graphNodes)if(!state.positions[n.id])state.positions[n.id]=state.positions[n.previous]?{...state.positions[n.previous]}:{x:n.x,y:n.y};
   for(const radius of [180,330,470])scene.append(svg('circle',{class:'orbit-ring',cx:550,cy:320,r:radius}));
   for(const link of graphLinks){const path=svg('path',{class:'graph-link '+link.type,'data-source':link.source,'data-target':link.target});path.style.setProperty('--node-color',link.color||'#b3a2e6');if(link.label)path.append(svg('title',{},link.label));scene.append(path);}
@@ -393,10 +489,23 @@ $('list-mode').onclick=()=>setMode('list');$('graph-mode').onclick=()=>{
 $('all-topics').onclick=()=>selectBlock('');$('new-record').onclick=()=>editRecord();
 $('close-detail').onclick=()=>{if(allowLeave()){state.detailRequest++;state.draft=null;state.selected='';state.selectedTopic='';$('detail').hidden=true;renderRecords();if(state.stopped)showStopped();}};
 $('search-form').onsubmit=e=>{e.preventDefault();void search($('query').value);};
+$('record-scope').onchange=()=>{
+  const value=$('record-scope').value;
+  $('project-scope-form').hidden=value!=='manual';
+  if(value==='workspace')void changeScope('workspace');
+  else if(value.startsWith('project:'))void changeScope('project',value.slice(8));
+};
+$('project-scope-form').onsubmit=e=>{e.preventDefault();const id=$('project-scope-id').value;
+  if(!id||id!==id.trim()){toast('Укажите точный ID проекта без пробелов по краям.');return;}
+  void changeScope('project',id);
+};
 $('query').addEventListener('input',()=>{if(!$('query').value&&state.query){state.query='';state.searchRequest++;$('search-info').hidden=true;void refresh();}});
-$('load-more').onclick=async()=>{const selected=state.block;$('load-more').disabled=true;try{
-  const page=await api(`api/records?block=${encodeURIComponent(selected)}&cursor=${encodeURIComponent(state.cursor)}`);
-  if(selected===state.block){const ids=new Set(state.records.map(r=>r.record_id));state.records.push(...page.records.filter(r=>!ids.has(r.record_id)));state.cursor=page.next_cursor;renderRecords();}
+$('load-more').onclick=async()=>{const selected=state.block,scopeKey=scopeQuery();$('load-more').disabled=true;try{
+  const page=await api(recordsUrl(selected,state.cursor));
+  if(selected===state.block&&scopeKey===scopeQuery()){
+    const ids=new Set(state.browseRecords.map(r=>r.record_id));state.browseRecords.push(...page.records.filter(r=>!ids.has(r.record_id)));state.cursor=page.next_cursor;
+    if(state.query)await search(state.query);else{state.records.push(...page.records.filter(r=>!state.records.some(item=>item.record_id===r.record_id)));renderRecords();}
+  }
 }catch(error){toast(error.message);}finally{$('load-more').disabled=false;}};
 window.addEventListener('beforeunload',e=>{if(state.draft?.dirty){e.preventDefault();e.returnValue='';}});
 document.addEventListener('keydown',e=>{if(e.key==='Escape'&&!$('detail').hidden)$('close-detail').click();

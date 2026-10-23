@@ -21,7 +21,14 @@ test("tools and each model continuation share session focus without leaking to a
   };
   try {
     await tools.get("set_active_mask").execute({ value: "old constraint" }, context("session-a"));
-    assert.match(await round("session-a"), /old constraint/);
+    const focused = await round("session-a");
+    assert.match(focused, /old constraint/);
+    assert.match(focused, /subtask changes/i);
+    assert.match(focused, /transition_active_mask/);
+    assert.match(focused, /covers this project only/i);
+    assert.match(focused, /or nothing/i);
+    assert.match(focused, /stable_project_facts/);
+    assert.match(focused, /routes them to matching project twins/i);
     assert.doesNotMatch(await round("session-b"), /old constraint/);
     await tools.get("amend_active_mask").execute({ value: "corrected constraint" }, context("session-a"));
     const next = await round("session-a");

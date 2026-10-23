@@ -519,6 +519,10 @@ CREATE INDEX idx_native_partition_events_identity
 ON native_partition_events(
     workspace_id, primary_block_id, catalog_revision_id, partition_id, id
 );
+CREATE INDEX idx_native_partition_events_stable_partition
+ON native_partition_events(workspace_id, primary_block_id, partition_id, id);
+CREATE INDEX idx_native_partition_events_partition_latency
+ON native_partition_events(workspace_id, primary_block_id, partition_id, latency_ms, id);
 CREATE VIRTUAL TABLE memory_fts USING fts5(
     block_id UNINDEXED,
     workspace_id UNINDEXED,
@@ -528,6 +532,17 @@ CREATE VIRTUAL TABLE memory_fts USING fts5(
     tokenize='unicode61'
 );
 """
+
+_NATIVE_PARTITION_METRIC_INDEXES = (
+    (
+        "CREATE INDEX IF NOT EXISTS idx_native_partition_events_stable_partition "
+        "ON native_partition_events(workspace_id, primary_block_id, partition_id, id)"
+    ),
+    (
+        "CREATE INDEX IF NOT EXISTS idx_native_partition_events_partition_latency "
+        "ON native_partition_events(workspace_id, primary_block_id, partition_id, latency_ms, id)"
+    ),
+)
 
 
 def _parse_time(value: str) -> datetime | None:
@@ -651,7 +666,7 @@ class BackendSQLiteIndex:
         self._projection_start_lock = threading.Lock()
         self._projection_workers: set[threading.Thread] = set()
         self.path.parent.mkdir(parents=True, exist_ok=True)
-        initialization_lock = FileLock(f"{self.path}.initialize.lock", timeout=10.0)
+        initialization_lock = FileLock(f"{self.path}.initialize.lock", timeout=120.0)
         with initialization_lock:
             if self.path.exists():
                 self._validate_existing_schema(self.path)
@@ -665,6 +680,23 @@ class BackendSQLiteIndex:
                 self._connections.append(connection)
                 self._conn.execute("PRAGMA busy_timeout=10000")
                 self._conn.execute("PRAGMA synchronous=FULL")
+                existing_indexes = {
+                    str(row[1])
+                    for row in self._conn.execute("PRAGMA index_list('native_partition_events')")
+                }
+                if {
+                    "idx_native_partition_events_stable_partition",
+                    "idx_native_partition_events_partition_latency",
+                } - existing_indexes:
+                    try:
+                        self._conn.execute("BEGIN IMMEDIATE")
+                        for statement in _NATIVE_PARTITION_METRIC_INDEXES:
+                            self._conn.execute(statement)
+                        self._conn.commit()
+                    except Exception:
+                        self._conn.rollback()
+                        self._conn.close()
+                        raise
                 return
             connection = sqlite3.connect(str(self.path), check_same_thread=False, timeout=10.0)
             self._thread_connection.connection = connection
@@ -4975,6 +5007,28 @@ class BackendSQLiteIndex:
         ).fetchall()
         return self._edge_records(rows)
 
+    def edges_between(self, record_ids: tuple[str, ...], *, limit: int) -> list[MemoryEdgeRecord]:
+        visible_ids = tuple(sorted(set(record_ids)))
+        if not visible_ids or limit <= 0:
+            return []
+        if len(visible_ids) > 64:
+            raise ValueError("edges_between supports at most 64 visible record IDs")
+        limit = min(limit, 129)
+        placeholders = ",".join("?" for _ in visible_ids)
+        rows = self._conn.execute(
+            f"""
+            SELECT payload_json FROM edges
+            WHERE workspace_id=?
+              AND src_id IN ({placeholders})
+              AND dst_id IN ({placeholders})
+              AND json_array_length(payload_json, '$.evidence_refs') > 0
+            ORDER BY src_id, dst_id, edge_type
+            LIMIT ?
+            """,
+            (self.workspace_id, *visible_ids, *visible_ids, limit),
+        ).fetchall()
+        return self._edge_records(rows)
+
     @staticmethod
     def _edge_records(rows: list[tuple[Any, ...]]) -> list[MemoryEdgeRecord]:
         out: list[MemoryEdgeRecord] = []
@@ -5101,14 +5155,6 @@ class BackendSQLiteIndex:
             },
         )
 
-    @staticmethod
-    def _nearest_rank_percentile(values: list[float], percentile: float) -> float:
-        if not values:
-            return 0.0
-        ordered = sorted(values)
-        rank = max(1, int(len(ordered) * percentile + 0.999999999))
-        return round(float(ordered[min(rank, len(ordered)) - 1]), 3)
-
     def _partition_record_count(
         self, partition: NativePartitionIdentity, *, profile_id: str, backend_partition_id: str
     ) -> int:
@@ -5202,49 +5248,69 @@ class BackendSQLiteIndex:
                 partition.catalog_revision_id,
             )
         )
-        rows = self._conn.execute(
+        event_where = "workspace_id=? AND primary_block_id=? AND partition_id=?" + event_filter
+        event_rows = self._conn.execute(
             """
-            SELECT operation, latency_ms, hit_count, record_bytes, rendered_tokens,
-                   success, search_mode, recorded_at
-            FROM native_partition_events
-            WHERE workspace_id=? AND primary_block_id=?
-              AND partition_id=?
-            """
-            + event_filter
-            + " ORDER BY id",
-            event_params,
-        ).fetchall()
-        write_count = sum(str(row[0]) == "write" for row in rows)
-        recall_rows = [row for row in rows if str(row[0]) == "recall"]
-        hit_count = sum(int(row[2]) for row in recall_rows if bool(row[5]))
-        zero_hit_count = sum(bool(row[5]) and int(row[2]) == 0 for row in recall_rows)
-        failure_count = sum(not bool(row[5]) for row in rows)
-        byte_values = [int(row[3]) for row in rows if row[3] is not None]
-        latencies = [float(row[1]) for row in rows if float(row[1]) > 0]
-        last_accessed_at = str(rows[-1][7]) if rows else ""
-        operation_counts = {
-            operation: sum(str(row[0]) == operation for row in rows)
-            for operation in ("consolidation", "compaction", "eviction", "expiry")
-        }
+            SELECT
+                COALESCE(SUM(operation='write'), 0),
+                COALESCE(SUM(operation='recall'), 0),
+                COALESCE(SUM(CASE WHEN operation='recall' AND success=1
+                                  THEN hit_count ELSE 0 END), 0),
+                COALESCE(SUM(operation='recall' AND success=1 AND hit_count=0), 0),
+                COALESCE(SUM(success=0), 0),
+                SUM(record_bytes),
+                COALESCE(SUM(rendered_tokens), 0),
+                COALESCE(SUM(operation='consolidation'), 0),
+                COALESCE(SUM(operation='compaction'), 0),
+                COALESCE(SUM(operation='eviction'), 0),
+                COALESCE(SUM(operation='expiry'), 0),
+                COALESCE(SUM(operation='recall' AND search_mode='scoped'), 0),
+                COALESCE(SUM(operation='recall' AND search_mode='search_all'), 0),
+                COALESCE(SUM(latency_ms > 0), 0),
+                (SELECT recorded_at FROM native_partition_events
+                 WHERE """
+            + event_where
+            + " ORDER BY id DESC LIMIT 1) FROM native_partition_events WHERE "
+            + event_where,
+            (*event_params, *event_params),
+        ).fetchone()
+        positive_latency_count = int(event_rows[13])
+        percentiles = (0.0, 0.0)
+        if positive_latency_count:
+            p50_rank = max(1, int(positive_latency_count * 0.50 + 0.999999999))
+            p95_rank = max(1, int(positive_latency_count * 0.95 + 0.999999999))
+            percentile_rows = self._conn.execute(
+                """
+                SELECT
+                    (SELECT latency_ms FROM native_partition_events
+                     WHERE """
+                + event_where
+                + " AND latency_ms>0 ORDER BY latency_ms, id LIMIT 1 OFFSET ?), "
+                "(SELECT latency_ms FROM native_partition_events WHERE "
+                + event_where
+                + " AND latency_ms>0 ORDER BY latency_ms, id LIMIT 1 OFFSET ?)",
+                (*event_params, p50_rank - 1, *event_params, p95_rank - 1),
+            ).fetchone()
+            percentiles = (float(percentile_rows[0]), float(percentile_rows[1]))
         return NativePartitionMetrics(
             identity=partition,
             record_count=record_count,
-            write_count=write_count,
-            recall_count=len(recall_rows),
-            hit_count=hit_count,
-            zero_hit_count=zero_hit_count,
-            failure_count=failure_count,
-            record_bytes=sum(byte_values) if byte_values else None,
-            latency_p50_ms=self._nearest_rank_percentile(latencies, 0.50),
-            latency_p95_ms=self._nearest_rank_percentile(latencies, 0.95),
-            rendered_tokens=sum(int(row[4]) for row in rows),
-            consolidation_count=operation_counts["consolidation"],
-            compaction_count=operation_counts["compaction"],
-            eviction_count=operation_counts["eviction"],
-            expiry_count=operation_counts["expiry"],
-            scoped_recall_count=sum(str(row[6]) == "scoped" for row in recall_rows),
-            broad_recall_count=sum(str(row[6]) == "search_all" for row in recall_rows),
-            last_accessed_at=last_accessed_at,
+            write_count=int(event_rows[0]),
+            recall_count=int(event_rows[1]),
+            hit_count=int(event_rows[2]),
+            zero_hit_count=int(event_rows[3]),
+            failure_count=int(event_rows[4]),
+            record_bytes=int(event_rows[5]) if event_rows[5] is not None else None,
+            latency_p50_ms=round(percentiles[0], 3),
+            latency_p95_ms=round(percentiles[1], 3),
+            rendered_tokens=int(event_rows[6]),
+            consolidation_count=int(event_rows[7]),
+            compaction_count=int(event_rows[8]),
+            eviction_count=int(event_rows[9]),
+            expiry_count=int(event_rows[10]),
+            scoped_recall_count=int(event_rows[11]),
+            broad_recall_count=int(event_rows[12]),
+            last_accessed_at=str(event_rows[14]) if event_rows[14] is not None else "",
             health=str(health or "unknown"),
         )
 

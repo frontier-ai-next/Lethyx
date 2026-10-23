@@ -1,7 +1,9 @@
+import hashlib
 import json
 import os
 from pathlib import Path
 
+from um_mem.contracts.memory import normalize_identity_path
 from um_mem.integrations.codex_hooks import (
     codex_hooks_status,
     codex_host_capability_manifest,
@@ -15,6 +17,7 @@ from um_mem.memory.local_service import (
     LocalServiceClientPool,
     build_local_service_identity,
     local_service_role_allows,
+    local_service_scope_lineage,
     shutdown_local_service_listener,
 )
 
@@ -297,6 +300,8 @@ def test_runner_uses_the_real_authenticated_listener_without_a_direct_backend(
 
 
 def test_prompt_context_uses_the_real_listener_and_scoped_candidate(tmp_path: Path) -> None:
+    project_path = normalize_identity_path(tmp_path, field_name="project_root")
+    project_id = "local-project-" + hashlib.sha256(project_path.encode("utf-8")).hexdigest()[:32]
     operator = build_local_service_identity(
         repo_root=tmp_path,
         workspace_id="alpha",
@@ -332,6 +337,71 @@ def test_prompt_context_uses_the_real_listener_and_scoped_candidate(tmp_path: Pa
             timeout_seconds=15,
             session_id="seed-session",
         )
+        project_leaf = pool.call(
+            operator,
+            "create_block",
+            {
+                "name": "Project Python editing",
+                "synopsis": "Project-specific Python editing preferences.",
+                "parent_id": root_id,
+                "reason": "Codex project context test",
+                "scope": "project",
+            },
+            timeout_seconds=15,
+            session_id="seed-session",
+            scope_lineage=local_service_scope_lineage(
+                operator, session_id="seed-session", project_id=project_id
+            ),
+        )
+        project_leaf_id = project_leaf["block_id"]
+        project_saved = pool.call(
+            operator,
+            "remember",
+            {
+                "content": "For this project, use focused Python patches.",
+                "title": "Project Python editing preference",
+                "requested_block_id": project_leaf_id,
+                "source_id": "codex-project-context-test",
+            },
+            timeout_seconds=15,
+            session_id="seed-session",
+            scope_lineage=local_service_scope_lineage(
+                operator, session_id="seed-session", project_id=project_id
+            ),
+        )
+        other_project_id = "local-project-" + "f" * 32
+        other_leaf = pool.call(
+            operator,
+            "create_block",
+            {
+                "name": "Other project editing",
+                "synopsis": "A different project's editing notes.",
+                "parent_id": root_id,
+                "reason": "Codex cross-project context test",
+                "scope": "project",
+            },
+            timeout_seconds=15,
+            session_id="seed-session",
+            scope_lineage=local_service_scope_lineage(
+                operator, session_id="seed-session", project_id=other_project_id
+            ),
+        )
+        other_leaf_id = other_leaf["block_id"]
+        other_saved = pool.call(
+            operator,
+            "remember",
+            {
+                "content": "For the other project, use a broad rewrite.",
+                "title": "Other project editing preference",
+                "requested_block_id": other_leaf_id,
+                "source_id": "codex-other-project-context-test",
+            },
+            timeout_seconds=15,
+            session_id="seed-session",
+            scope_lineage=local_service_scope_lineage(
+                operator, session_id="seed-session", project_id=other_project_id
+            ),
+        )
         result = read_codex_prompt_context(
             _payload(tmp_path, prompt="What Python editing style should I use?"),
             working_directory=tmp_path,
@@ -343,7 +413,7 @@ def test_prompt_context_uses_the_real_listener_and_scoped_candidate(tmp_path: Pa
             operator,
             "set_active_mask",
             {
-                "selected_block_ids": [leaf_id],
+                "selected_block_ids": [leaf_id, project_leaf_id, other_leaf_id],
                 "token_budget": 512,
                 "activation_reason": "Keep the editing preference in Codex focus",
             },
@@ -357,6 +427,19 @@ def test_prompt_context_uses_the_real_listener_and_scoped_candidate(tmp_path: Pa
             backend="mempalace",
             pool=pool,
         )
+        explicit_legacy = pool.call(
+            operator,
+            "build_context",
+            {
+                "query": "focused Python patches",
+                "scope_chain": ["workspace:alpha"],
+                "search_all": True,
+                "include_candidates": True,
+                "render_context": False,
+            },
+            timeout_seconds=15,
+            session_id="seed-session",
+        )
     finally:
         pool.close()
         shutdown_local_service_listener(operator)
@@ -364,11 +447,21 @@ def test_prompt_context_uses_the_real_listener_and_scoped_candidate(tmp_path: Pa
     assert roots["ok"] is True, roots
     assert leaf["ok"] is True, leaf
     assert saved["ok"] is True, saved
+    assert project_leaf["ok"] is True, project_leaf
+    assert project_saved["ok"] is True, project_saved
+    assert other_leaf["ok"] is True, other_leaf
+    assert other_saved["ok"] is True, other_saved
     assert result["ok"] is True, result
-    assert "focused Python patches" in result["additional_context"]
+    assert "For this project" in result["additional_context"]
+    assert "For this workspace" not in result["additional_context"]
+    assert "For the other project" not in result["additional_context"]
     assert mask["ok"] is True, mask
     assert active_result["ok"] is True, active_result
-    assert "focused Python patches" in active_result["additional_context"]
+    assert "For this project" in active_result["additional_context"]
+    assert "For this workspace" not in active_result["additional_context"]
+    assert "For the other project" not in active_result["additional_context"]
+    assert explicit_legacy["ok"] is True, explicit_legacy
+    assert any("For this workspace" in item["text"] for item in explicit_legacy["items"])
 
 
 def test_hook_input_is_bounded_and_control_output_never_exposes_memory_result() -> None:
@@ -442,12 +535,13 @@ def test_prompt_hook_delivers_only_bounded_advisory_memory(tmp_path: Path) -> No
     )
     assert mask_identity.caller_role == "host_hook"
     assert mask_tool == "resolve_active_mask"
-    assert mask_arguments == {"max_tokens": 512}
+    assert mask_arguments["max_tokens"] == 512
+    assert mask_arguments["scope_chain"] == arguments["scope_chain"]
     assert identity.caller_role == "host_hook"
     assert tool == "build_context"
     assert arguments["query"] == payload["prompt"]
     assert arguments["include_candidates"] is True
-    assert arguments["scope_chain"] == ["workspace:alpha"]
+    assert arguments["scope_chain"] == [f"project:{kwargs['scope_lineage'].project_id}"]
     assert arguments["search_all"] is True
     assert arguments["max_tokens"] <= 512
     assert kwargs["session_id"] == payload["session_id"]

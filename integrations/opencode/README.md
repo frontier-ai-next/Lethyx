@@ -47,9 +47,32 @@ configuration is changed by building or testing this package.
 ## Scope and lifecycle
 
 - Host-provided session IDs bind both tool calls and active-context reads.
+  The adapter derives a stable project ID from the host working directory's Git
+  root and binds it to its MCP processes. Automatic active-context delivery
+  accepts only records in that project scope. Put new reusable project knowledge
+  in project-scoped blocks; OpenCode automatically routes the four supported
+  workspace taxonomy leaves for stable facts, decisions, ideas, and reflection
+  candidates to static project-scoped twins with matching policy. Other new
+  workspace `remember` writes fail with guidance to choose a supported route or
+  create an explicit project-scoped block. User-global, session, task, and
+  subtask routes are left to their existing contracts. Old shared workspace
+  records stay available through explicit `recall` or `build_context` calls.
+  Addressed `amend` and `forget` retain their existing governed exact-record
+  paths. A legacy correction submitted through `remember(operation="correct")`
+  is rejected rather than retargeted; use `read_exact_record`, then `amend` with
+  the record ID, block ID, and expected revision, or `forget` with the exact ID.
   The task ID is explicitly conversation-scoped (`opencode-session:<sessionID>`):
   the public context hook does not expose a stable task ID. Changing subtasks
-  inside that conversation requires the agent to change or deactivate focus.
+  inside that conversation has no automatic host signal. When a clear subtask
+  change makes the current focus irrelevant, the agent should explicitly call
+  `transition_active_mask` with `transition: "deactivate"` and an audit reason,
+  then inspect and select a new focus with the memory tools. The next context
+  hook confirms the old focus is no longer delivered. The adapter does not infer
+  task changes from prompt text, session titles, or agent identity.
+- The context hook adds one short reflection reminder: after meaningful work,
+  choose between a sourced lasting fact, an explicitly unverified hypothesis,
+  and no write. This is an agent decision, not a model callback or an automatic
+  `MemoryReviewReceipt`; the host still needs a real boundary to attest it.
 - `block_map` and `recall` stay visible in the Code Mode catalog so ordinary
   navigation and reading need no preliminary tool-discovery call. Navigation
   exposes bounded pages; follow `next_cursor` and use `child_count` rather than
