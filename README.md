@@ -13,9 +13,9 @@ completion. Memory supplies scoped advisory context. A source-exact check can
 confirm that stored text matches host-owned evidence; it does not prove that
 the source is true. Unverified agent summaries remain candidates.
 
-**Current integration status:** Codex has prompt-time scoped recall and a
-one-pass same-agent review at `Stop` when its installed hooks run. Claude Code
-has the same one-pass review hook. Hermes has a native pre-round provider and
+**Current integration status:** Codex has prompt-time scoped recall and silent
+turn-completion capture at `Stop` when its installed hooks run. Claude Code
+has a one-pass review hook. Hermes has a native pre-round provider and
 agent memory guidance. MCP alone exposes tools but cannot force an agent to
 write or capture host lifecycle events. The default OpenCode MCP connection does
 not yet guarantee the automatic review loop. Installed settings do not prove

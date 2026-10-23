@@ -476,7 +476,7 @@ def test_hook_input_is_bounded_and_control_output_never_exposes_memory_result() 
     assert hook_control_response("PostToolUse") == {}
 
 
-def test_stop_requests_one_same_agent_memory_review_without_looping(tmp_path: Path) -> None:
+def test_stop_captures_boundary_without_blocking_response(tmp_path: Path) -> None:
     pool = CapturingClientPool()
     first = _payload(
         tmp_path,
@@ -491,11 +491,8 @@ def test_stop_requests_one_same_agent_memory_review_without_looping(tmp_path: Pa
 
     assert first_result["ok"] is True
     assert second_result["ok"] is True
-    response = hook_control_response("Stop", review_needed=True)
-    assert response["decision"] == "block"
-    assert "UM-MEM" in response["reason"]
-    assert "nothing" in response["reason"]
-    assert hook_control_response("Stop", review_needed=False) == {"continue": True}
+    response = hook_control_response("Stop")
+    assert response == {"continue": True}
     assert len(pool.host_state_calls) == 2
 
 
@@ -507,10 +504,10 @@ def test_stop_does_not_continue_when_host_state_capture_failed(tmp_path: Path) -
     )
 
     assert result["ok"] is False
-    assert hook_control_response("Stop", review_needed=False) == {"continue": True}
+    assert hook_control_response("Stop") == {"continue": True}
 
 
-def test_stop_command_continues_the_same_agent_once(
+def test_stop_command_never_injects_review_prompt(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
     from um_mem.integrations import codex_hooks
@@ -522,7 +519,7 @@ def test_stop_command_continues_the_same_agent_once(
     pool = CommandPool()
     monkeypatch.chdir(tmp_path)
     monkeypatch.setattr(codex_hooks, "LocalServiceClientPool", lambda: pool)
-    for active, expected_decision in ((False, "block"), (True, None)):
+    for active in (False, True):
         payload = _payload(
             tmp_path,
             hook_event_name="Stop",
@@ -536,7 +533,7 @@ def test_stop_command_continues_the_same_agent_once(
         )
         assert codex_hooks.main(["--repo-root", str(tmp_path), "--backend", "mempalace"]) == 0
         response = json.loads(capsys.readouterr().out)
-        assert response.get("decision") == expected_decision
+        assert response == {"continue": True}
 
 
 def test_prompt_hook_delivers_only_bounded_advisory_memory(tmp_path: Path) -> None:
