@@ -9,8 +9,6 @@ Set ``UM_MEM_MCP_RESPONSE_MODE=compact`` to opt into the token-efficient
 projection; full service payloads are the default.
 """
 
-from __future__ import annotations
-
 import os
 from typing import Any
 
@@ -21,6 +19,9 @@ _BLOCK_FIELDS = (
     "tags",
     "parent_id",
     "child_ids",
+    "child_count",
+    "children_truncated",
+    "next_cursor",
     "record_count",
     "canonical_record_count",
     "writable",
@@ -31,6 +32,8 @@ _BLOCK_FIELDS = (
     "meta",
     "node_kind",
     "index_only",
+    "diagnostics_status",
+    "metrics_scope",
 )
 
 _RECORD_FIELDS = (
@@ -152,6 +155,8 @@ def _compact_route(route: Any) -> dict[str, Any]:
 
 
 def _hit_record_id(hit: dict[str, Any]) -> str:
+    if hit.get("record_id"):
+        return str(hit["record_id"])
     metadata = hit.get("metadata")
     if isinstance(metadata, dict):
         for key in ("record_id", "block_id"):
@@ -191,6 +196,23 @@ def _compact_hit(hit: Any) -> dict[str, Any]:
         "authority": hit.get("authority") or "",
         "status": metadata.get("status") or hit.get("status") or "",
     }
+    for key in (
+        "source_speakers",
+        "source_dates",
+        "speaker_id",
+        "subject_id",
+        "verification_status",
+        "valid_from",
+        "valid_to",
+        "expires_at",
+        "historical",
+        "as_of",
+        "known_as_of",
+        "event_time_status",
+    ):
+        value = metadata.get(key, hit.get(key))
+        if value not in (None, "", [], ()):
+            compact[key] = value
     if hit.get("truncated"):
         compact["truncated"] = True
     return compact
@@ -214,6 +236,19 @@ def _compact_lease(lease: Any) -> Any:
         compact["rendered_context"] = lease.get("rendered_context")
     if "token_count" in lease:
         compact["token_count"] = lease.get("token_count")
+    compact.update(_pick(lease, ("token_budget", "estimated_tokens", "metadata_tokens")))
+    compact["trace"] = _pick(
+        lease.get("trace"),
+        (
+            "mask_id",
+            "mask_revision",
+            "catalog_revision",
+            "resolution_status",
+            "scope_validation_result",
+            "refresh_reason",
+            "truncated_item_count",
+        ),
+    )
     return compact
 
 
@@ -347,6 +382,8 @@ def _compact_mask(result: dict[str, Any]) -> dict[str, Any]:
         compact["token_budget"] = mask.get("token_budget")
         compact["activation_reason"] = mask.get("activation_reason") or ""
         compact["pinned_record_ids"] = list(mask.get("pinned_record_ids") or [])
+    elif result.get("ok") is True and "mask" in result and result["mask"] is None:
+        compact["status"] = "absent"
     if result.get("error"):
         compact["error"] = result["error"]
     if "replayed" in result:
@@ -396,6 +433,7 @@ def compact_response(name: str, result: Any) -> Any:
             "backend": result.get("backend"),
             "root": _compact_block(result.get("root")),
             "children": _compact_blocks(result.get("children")),
+            **_pick(result, ("path_ids", "catalog_revision", "child_count", "next_cursor")),
         }
     if name == "create_block":
         return _compact_block_mutation(result)
@@ -607,6 +645,7 @@ def compact_response(name: str, result: Any) -> Any:
             "profile_id": result.get("profile_id"),
             "catalog_revision": result.get("catalog_revision"),
             "tree_path": list(result.get("tree_path") or []),
+            **_pick(result, ("child_count", "next_cursor")),
             "block": _compact_block(block),
             "children": _compact_blocks(result.get("children")),
             "related_block_ids": related_ids,

@@ -29,7 +29,12 @@ def provider_tool_schemas(
             ),
             "parameters": {
                 "type": "object",
-                "properties": {},
+                "properties": {
+                    "depth": {"type": "integer", "minimum": 1, "maximum": 8, "default": 1},
+                    "include_meta": {"type": "boolean", "default": False},
+                    "child_limit": {"type": "integer", "minimum": 1, "maximum": 200, "default": 50},
+                },
+                "additionalProperties": False,
             },
         },
         {
@@ -37,12 +42,18 @@ def provider_tool_schemas(
             "description": (
                 "Expand one content-free branch before recall or remember. Inspect each "
                 "leaf's writable reason, allowed operations, retention, native isolation, "
-                "record count, health, and latency; expand deeper when children remain."
+                "record count, health, and latency. Follow next_cursor for more children; "
+                "restart pagination if the catalog revision changes."
             ),
             "parameters": {
                 "type": "object",
-                "properties": {"block_id": {"type": "string"}},
+                "properties": {
+                    "block_id": {"type": "string"},
+                    "limit": {"type": "integer", "minimum": 1, "maximum": 200, "default": 50},
+                    "cursor": {"type": "string", "default": ""},
+                },
                 "required": ["block_id"],
+                "additionalProperties": False,
             },
         },
         {
@@ -53,7 +64,11 @@ def provider_tool_schemas(
             ),
             "parameters": {
                 "type": "object",
-                "properties": {"block_id": {"type": "string", "minLength": 1}},
+                "properties": {
+                    "block_id": {"type": "string", "minLength": 1},
+                    "limit": {"type": "integer", "minimum": 1, "maximum": 200, "default": 50},
+                    "cursor": {"type": "string", "default": ""},
+                },
                 "required": ["block_id"],
                 "additionalProperties": False,
             },

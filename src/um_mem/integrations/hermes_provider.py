@@ -3680,7 +3680,7 @@ class UmMemMemoryProvider(MemoryProvider):
         definitions = {
             "um_mem_provider_navigation_envelope": (
                 "navigation_envelope",
-                {"block_id"},
+                {"block_id", "limit", "cursor"},
                 ("block_id",),
             ),
             "um_mem_provider_create_block": (
@@ -3931,14 +3931,14 @@ class UmMemMemoryProvider(MemoryProvider):
                 "provider_tools": status["provider_tools"],
             }
         elif tool_name == "um_mem_provider_block_map":
-            if args:
+            if set(args).difference({"depth", "include_meta", "child_limit"}):
                 return json.dumps(
-                    {"ok": False, "error": "UM-MEM block map accepts no arguments"},
+                    {"ok": False, "error": "unknown UM-MEM block map argument"},
                     ensure_ascii=False,
                 )
-            payload = self._call("block_map", {})
+            payload = self._call("block_map", args)
         elif tool_name == "um_mem_provider_expand_block":
-            unknown_args = sorted(set(args).difference({"block_id"}))
+            unknown_args = sorted(set(args).difference({"block_id", "limit", "cursor"}))
             if unknown_args:
                 return json.dumps(
                     {
@@ -3953,7 +3953,7 @@ class UmMemMemoryProvider(MemoryProvider):
                     {"ok": False, "error": "block_id is required"},
                     ensure_ascii=False,
                 )
-            payload = self._call("expand_block", {"block_id": block_id})
+            payload = self._call("expand_block", {**args, "block_id": block_id})
         elif tool_name == "um_mem_provider_recall_blocks":
             return self._handle_recall_tool(args, scoped=True)
         elif tool_name == "um_mem_provider_search_all":

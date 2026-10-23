@@ -46,9 +46,23 @@ Claude Code, Codex and Hermes read their MCP settings from the user profile, so
 connect them once per identity with an explicit `--workspace`. `--local` refuses
 those hosts instead of silently rewriting the user-level entry.
 
-Workspace-scoped records never leave their workspace. Records written with
-`user_global` scope are the deliberate exception: they are shared between
-workspaces when the same user id is bound.
+Workspace and `project:` records remain within one workspace; a shared
+`project_id` does not join workspace stores. The optional manager layer uses
+the same store's `.UM-MEM/memory/` directory. In Python, write a `user_global`
+leaf through `MemoryClient(store, workspace_id="um-mem-manager", user_id="alice")`
+and read it from another workspace with the same `user_id` and
+`recall(..., search_all=True, include_manager=True)` or
+`build_context(..., search_all=True, include_manager=True)`. Manager reads are
+off by default and delivered as supplemental, advisory evidence. Only records
+in manager blocks whose isolation policy permits cross-workspace delivery are
+included; a `user_global` record written in an ordinary workspace is not
+silently copied into the manager store. Bind a stable user identity explicitly.
+Candidate records still obey the run boundary: publish them through evidence
+and verification gates before relying on them in another session.
+MCP `recall` and `build_context` also accept `include_manager=True` when the
+server is bound to `UM_MEM_USER_ID`; the MCP server does not accept a caller-
+supplied user identity. An MCP connection to the reserved manager identity
+addresses that layer directly for writes.
 
 ## Install from GitHub
 

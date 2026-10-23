@@ -1,3 +1,5 @@
+import base64
+import binascii
 import hashlib
 import json
 import sqlite3
@@ -287,6 +289,53 @@ class BlockGraphEdge:
 
 
 @dataclass(frozen=True)
+class TopologyNavigation:
+    states: tuple[TopologyBlockState, ...]
+    path_ids: tuple[str, ...]
+    child_ids: dict[str, tuple[str, ...]]
+    edges: dict[str, tuple[BlockGraphEdge, ...]]
+    catalog_revision: int
+    child_counts: dict[str, int]
+    next_cursors: dict[str, str]
+
+
+def navigation_cursor(
+    workspace_id: str, profile_id: str, block_id: str, revision: str, after: tuple[str, str]
+) -> str:
+    raw = json.dumps([workspace_id, profile_id, block_id, revision, *after], separators=(",", ":"))
+    token = base64.urlsafe_b64encode(raw.encode("utf-8")).decode("ascii").rstrip("=")
+    if len(token) > 4096:
+        raise ValueError("navigation cursor exceeds size limit")
+    return token
+
+
+def read_navigation_cursor(
+    cursor: str, *, workspace_id: str, profile_id: str, block_id: str, revision: str | None
+) -> tuple[str, str]:
+    if not isinstance(cursor, str) or len(cursor) > 4096:
+        raise ValueError("invalid navigation cursor")
+    if not cursor:
+        return "", ""
+    try:
+        payload = json.loads(
+            base64.b64decode(cursor + "=" * (-len(cursor) % 4), altchars=b"-_", validate=True)
+        )
+    except (ValueError, binascii.Error, UnicodeError) as exc:
+        raise ValueError("invalid navigation cursor") from exc
+    if (
+        not isinstance(payload, list)
+        or len(payload) != 6
+        or any(not isinstance(item, str) for item in payload)
+    ):
+        raise ValueError("invalid navigation cursor")
+    if payload[:3] != [workspace_id, profile_id, block_id]:
+        raise ValueError("navigation cursor scope does not match")
+    if revision is not None and payload[3] != revision:
+        raise ValueError("navigation cursor revision changed; restart from the first page")
+    return payload[4], payload[5]
+
+
+@dataclass(frozen=True)
 class MaintenanceObservation:
     observation_id: str
     workspace_id: str
@@ -441,6 +490,11 @@ class WorkspaceCatalogStore:
         ).fetchone()
         if row is None or int(row[0]) != _SCHEMA_VERSION:
             raise RuntimeError("workspace catalog schema mismatch; clean rebuild required")
+        with self._conn:
+            self._conn.execute(
+                "CREATE INDEX IF NOT EXISTS idx_topology_navigation_order ON topology_blocks"
+                "(workspace_id, profile_id, parent_id, status, created_at, block_id)"
+            )
         existing = self._conn.execute("SELECT block_id FROM topology_blocks LIMIT 1").fetchone()
         if existing is None:
             self._create_root()
@@ -895,6 +949,109 @@ class WorkspaceCatalogStore:
             (self.workspace_id, self.profile_id, str(block_id or "").strip()),
         ).fetchone()
         return self._block_state(row) if row is not None else None
+
+    def navigation(
+        self,
+        *,
+        block_id: str = "",
+        depth: int = 1,
+        include_edges: bool = False,
+        child_limit: int = 50,
+        cursor: str = "",
+    ) -> TopologyNavigation:
+        """Read one visible branch in a consistent snapshot without decoding other branches."""
+        if type(depth) is not int or not 1 <= depth <= 8:
+            raise ValueError("navigation depth must be an integer from 1 to 8")
+        if type(child_limit) is not int or not 1 <= child_limit <= 200:
+            raise ValueError("navigation child limit must be an integer from 1 to 200")
+        with self._conn:
+            self._conn.execute("BEGIN")
+            revision = self.catalog_revision()
+            path: list[str] = []
+            current_id = block_id
+            while current_id:
+                state = self.get_block(current_id)
+                if state is None or state.status != "active":
+                    read_navigation_cursor(
+                        cursor,
+                        workspace_id=self.workspace_id,
+                        profile_id=self.profile_id,
+                        block_id=block_id,
+                        revision=None,
+                    )
+                    return TopologyNavigation((), (), {}, {}, revision, {}, {})
+                if current_id in path:
+                    raise ValueError("memory block hierarchy contains a cycle")
+                path.append(current_id)
+                current_id = state.block.parent_id
+            after = read_navigation_cursor(
+                cursor,
+                workspace_id=self.workspace_id,
+                profile_id=self.profile_id,
+                block_id=block_id,
+                revision=str(revision),
+            )
+            if block_id:
+                pending = [(block_id, 1)]
+            else:
+                pending = [
+                    (str(row[0]), 1)
+                    for row in self._conn.execute(
+                        "SELECT block_id FROM topology_blocks "
+                        "WHERE workspace_id=? AND profile_id=? AND parent_id='' AND status='active' "
+                        "ORDER BY created_at, block_id",
+                        (self.workspace_id, self.profile_id),
+                    )
+                ]
+            states: list[TopologyBlockState] = []
+            children: dict[str, tuple[str, ...]] = {}
+            edges: dict[str, tuple[BlockGraphEdge, ...]] = {}
+            counts: dict[str, int] = {}
+            cursors: dict[str, str] = {}
+            for selected_id, level in pending:
+                state = self.get_block(selected_id)
+                if state is None or state.status != "active":
+                    raise ValueError("navigation encountered an unavailable block")
+                states.append(state)
+                scope = (self.workspace_id, self.profile_id, selected_id)
+                counts[selected_id] = int(
+                    self._conn.execute(
+                        "SELECT COUNT(*) FROM topology_blocks WHERE workspace_id=? AND profile_id=? "
+                        "AND parent_id=? AND status='active'",
+                        scope,
+                    ).fetchone()[0]
+                )
+                # Child summaries disclose branch size, not another unbounded list of grandchildren.
+                page_limit = child_limit if level < depth or depth == 1 else 0
+                if level < depth:
+                    page_limit = min(page_limit, max(0, 201 - len(pending)))
+                page_after = after if selected_id == block_id else ("", "")
+                rows = self._conn.execute(
+                    "SELECT created_at, block_id FROM topology_blocks "
+                    "WHERE workspace_id=? AND profile_id=? AND parent_id=? AND status='active' "
+                    "AND (created_at,block_id)>(?,?) ORDER BY created_at, block_id LIMIT ?",
+                    (*scope, *page_after, page_limit + 1),
+                ).fetchall()
+                shown = rows[:page_limit]
+                children[selected_id] = tuple(str(row[1]) for row in shown)
+                cursors[selected_id] = (
+                    navigation_cursor(
+                        self.workspace_id,
+                        self.profile_id,
+                        selected_id,
+                        str(revision),
+                        (str(shown[-1][0]), str(shown[-1][1])) if shown else page_after,
+                    )
+                    if len(rows) > page_limit
+                    else ""
+                )
+                if include_edges:
+                    edges[selected_id] = tuple(self.edges_for(selected_id))
+                if level < depth:
+                    pending.extend((child_id, level + 1) for child_id in children[selected_id])
+            return TopologyNavigation(
+                tuple(states), tuple(reversed(path)), children, edges, revision, counts, cursors
+            )
 
     def create_block(
         self,

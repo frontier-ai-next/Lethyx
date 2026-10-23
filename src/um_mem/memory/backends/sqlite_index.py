@@ -4184,6 +4184,7 @@ class BackendSQLiteIndex:
         workspace_id: str = "",
         profile_id: str = "",
         historical: bool = False,
+        backend_partition_id: str = "",
     ) -> tuple[str, ...]:
         block_ids = tuple(
             dict.fromkeys(
@@ -4208,12 +4209,16 @@ class BackendSQLiteIndex:
         ]
         if not historical:
             clauses.append("membership.is_current=1")
+        membership_params = [target_workspace, *block_ids]
+        if backend_partition_id:
+            clauses.append("membership.backend_partition_id=?")
+            membership_params.append(backend_partition_id)
         rows = self._conn.execute(
             "SELECT DISTINCT membership.record_id "
             "FROM record_block_memberships AS membership WHERE "
             + " AND ".join(clauses)
             + " ORDER BY membership.record_id",
-            (target_workspace, *block_ids),
+            membership_params,
         ).fetchall()
         matching_ids = tuple(str(row[0]) for row in rows)
         selected_profile = str(profile_id or "").strip()
@@ -4241,17 +4246,31 @@ class BackendSQLiteIndex:
                 if not chunk:
                     continue
                 selected_rows = catalog.execute(
-                    "SELECT record_id,block_id FROM published_record_memberships "
+                    "SELECT record_id,block_id,backend_partition_id FROM published_record_memberships "
                     "WHERE workspace_id=? AND profile_id=? AND record_id IN ("
                     + ",".join("?" for _ in chunk)
                     + ")",
                     (target_workspace, selected, *chunk),
                 ).fetchall()
-                moved.update(str(row[0]) for row in selected_rows if str(row[1]) not in block_ids)
+                moved.update(
+                    str(row[0])
+                    for row in selected_rows
+                    if str(row[1]) not in block_ids
+                    or (backend_partition_id and str(row[2]) != backend_partition_id)
+                )
+            partition_clause = " AND backend_partition_id=?" if backend_partition_id else ""
             assigned = catalog.execute(
                 "SELECT record_id FROM published_record_memberships "
-                "WHERE workspace_id=? AND profile_id=? AND block_id IN (" + placeholders + ")",
-                (target_workspace, selected, *block_ids),
+                "WHERE workspace_id=? AND profile_id=? AND block_id IN ("
+                + placeholders
+                + ")"
+                + partition_clause,
+                (
+                    target_workspace,
+                    selected,
+                    *block_ids,
+                    *((backend_partition_id,) if backend_partition_id else ()),
+                ),
             ).fetchall()
             assigned_ids = tuple(str(row[0]) for row in assigned)
             for offset in range(0, len(assigned_ids), 400):
@@ -4329,18 +4348,18 @@ class BackendSQLiteIndex:
             catalog = self._topology_catalog_connection(selected_profile)
             if catalog is None:
                 continue
+            selected_clause = (
+                " AND block_id IN (" + ",".join("?" for _ in selected) + ")" if selected else ""
+            )
             archived = {
                 str(row[0])
                 for row in catalog.execute(
                     "SELECT block_id FROM topology_blocks WHERE workspace_id=? "
-                    "AND profile_id=? AND status!='active'",
-                    (workspace_id, selected_profile),
+                    "AND profile_id=? AND status!='active'" + selected_clause,
+                    (workspace_id, selected_profile, *selected),
                 ).fetchall()
             }
             identities = {identity for identity in identities if identity[0] not in archived}
-            selected_clause = (
-                " AND block_id IN (" + ",".join("?" for _ in selected) + ")" if selected else ""
-            )
             projected = catalog.execute(
                 "SELECT DISTINCT block_id,catalog_revision_id,backend_partition_id "
                 "FROM published_record_memberships WHERE workspace_id=? AND profile_id=?"
@@ -4353,6 +4372,55 @@ class BackendSQLiteIndex:
                 if str(row[0]) not in archived
             )
         return tuple(sorted(identities))
+
+    def _has_published_membership_override(
+        self, logical_block_id: str, *, workspace_id: str, profile_id: str
+    ) -> bool:
+        catalog = self._topology_catalog_connection(profile_id)
+        if catalog is None:
+            return False
+        if (
+            catalog.execute(
+                "SELECT 1 FROM published_record_memberships WHERE workspace_id=? AND profile_id=? "
+                "AND block_id=? LIMIT 1",
+                (workspace_id, profile_id, logical_block_id),
+            ).fetchone()
+            is not None
+        ):
+            return True
+        if (
+            catalog.execute(
+                "SELECT 1 FROM published_record_memberships WHERE workspace_id=? AND profile_id=? LIMIT 1",
+                (workspace_id, profile_id),
+            ).fetchone()
+            is None
+        ):
+            return False
+        # A revived source can have only outgoing overrides. Inspect bounded ID batches,
+        # not canonical payloads or every other leaf's publications.
+        members = self._conn.execute(
+            "SELECT membership.record_id FROM record_block_memberships AS membership "
+            "JOIN blocks AS record ON record.block_id=membership.record_id "
+            "WHERE membership.workspace_id=? AND membership.logical_block_id=? "
+            "AND membership.role='primary' AND membership.is_current=1 "
+            "AND json_extract(record.payload_json,'$.profile_id')=?",
+            (workspace_id, logical_block_id, profile_id),
+        )
+        try:
+            while rows := members.fetchmany(400):
+                ids = tuple(str(row[0]) for row in rows)
+                if (
+                    catalog.execute(
+                        "SELECT 1 FROM published_record_memberships WHERE workspace_id=? AND profile_id=? "
+                        "AND record_id IN (" + ",".join("?" for _ in ids) + ") LIMIT 1",
+                        (workspace_id, profile_id, *ids),
+                    ).fetchone()
+                    is not None
+                ):
+                    return True
+            return False
+        finally:
+            members.close()
 
     def logical_block_descriptor_snapshot(
         self, logical_block_id: str, *, workspace_id: str, profile_id: str
@@ -4367,25 +4435,18 @@ class BackendSQLiteIndex:
         ):
             raise ValueError("descriptor snapshot requires an exact block and scope")
         catalog = self._topology_catalog_connection(profile_id)
-        evolved = (
-            catalog.execute(
-                "SELECT 1 FROM published_record_memberships WHERE workspace_id=? "
-                "AND profile_id=? AND block_id=? "
-                "UNION SELECT 1 FROM topology_blocks WHERE workspace_id=? "
+        evolved = self._has_published_membership_override(
+            logical_block_id, workspace_id=workspace_id, profile_id=profile_id
+        ) or (
+            catalog is not None
+            and catalog.execute(
+                "SELECT 1 FROM topology_blocks WHERE workspace_id=? "
                 "AND profile_id=? AND block_id=? AND status='archived' LIMIT 1",
-                (
-                    workspace_id,
-                    profile_id,
-                    logical_block_id,
-                    workspace_id,
-                    profile_id,
-                    logical_block_id,
-                ),
+                (workspace_id, profile_id, logical_block_id),
             ).fetchone()
-            if catalog is not None
-            else None
+            is not None
         )
-        if evolved is not None:
+        if evolved:
             ids = self.record_ids_for_logical_blocks(
                 (logical_block_id,), workspace_id=workspace_id, profile_id=profile_id
             )
@@ -4567,12 +4628,8 @@ class BackendSQLiteIndex:
     @staticmethod
     def _workspace_scope_filter(payload: dict[str, Any]) -> tuple[str, ...]:
         scope_chain = query_sequence(payload, "scope_chain")
-        # A project id is lineage inside one workspace, not a group of
-        # workspaces, so only the user-global level may widen the physical
-        # scan.  Every other scope keeps the workspace filter, and the client
-        # re-checks the record workspace before a hit is returned.
-        if any(scope_key.startswith("user_global:") for scope_key in scope_chain):
-            return ()
+        # Neither project nor user-global lineage widens a workspace scan.
+        # Cross-workspace reads use the separate manager backend instead.
         return tuple(
             scope_key.split(":", 1)[1]
             for scope_key in scope_chain
@@ -5052,23 +5109,75 @@ class BackendSQLiteIndex:
         rank = max(1, int(len(ordered) * percentile + 0.999999999))
         return round(float(ordered[min(rank, len(ordered)) - 1]), 3)
 
+    def _partition_record_count(
+        self, partition: NativePartitionIdentity, *, profile_id: str, backend_partition_id: str
+    ) -> int:
+        if self._has_published_membership_override(
+            partition.primary_block_id, workspace_id=partition.workspace_id, profile_id=profile_id
+        ):
+            ids = self.record_ids_for_logical_blocks(
+                (partition.primary_block_id,),
+                workspace_id=partition.workspace_id,
+                profile_id=profile_id,
+                backend_partition_id=backend_partition_id,
+            )
+            count = 0
+            for offset in range(0, len(ids), 400):
+                chunk = ids[offset : offset + 400]
+                count += int(
+                    self._conn.execute(
+                        "SELECT COUNT(*) FROM blocks WHERE workspace_id=? AND "
+                        "status NOT IN ('superseded','deprecated','retracted','quarantined','expired') "
+                        "AND block_id IN (" + ",".join("?" for _ in chunk) + ")",
+                        (partition.workspace_id, *chunk),
+                    ).fetchone()[0]
+                )
+            return count
+        return int(
+            self._conn.execute(
+                "SELECT COUNT(*) FROM record_block_memberships AS membership "
+                "JOIN blocks AS record ON record.block_id=membership.record_id "
+                "WHERE membership.workspace_id=? AND membership.logical_block_id=? "
+                "AND membership.backend_partition_id=? AND membership.role='primary' "
+                "AND membership.is_current=1 AND json_extract(record.payload_json,'$.profile_id')=? "
+                "AND record.status NOT IN ('superseded','deprecated','retracted','quarantined','expired') "
+                "AND NOT EXISTS (SELECT 1 FROM canonical_head_outbox AS pending "
+                "WHERE pending.successor_id=membership.record_id AND pending.status<>'committed')",
+                (
+                    partition.workspace_id,
+                    partition.primary_block_id,
+                    backend_partition_id,
+                    profile_id,
+                ),
+            ).fetchone()[0]
+        )
+
     def partition_metrics(
         self,
         partition: NativePartitionIdentity,
         *,
         health: str = "unknown",
+        profile_id: str = "",
+        backend_partition_id: str = "",
     ) -> NativePartitionMetrics:
         if partition.backend_id != self.backend_id:
             raise ValueError("native partition metrics backend does not match selected backend")
+        if bool(profile_id) != bool(backend_partition_id):
+            raise ValueError("scoped partition metrics require profile and stable partition key")
         identity = (
             partition.workspace_id,
             partition.primary_block_id,
             partition.catalog_revision_id,
             partition.partition_id,
         )
-        record_count = int(
-            self._conn.execute(
-                """
+        record_count = (
+            self._partition_record_count(
+                partition, profile_id=profile_id, backend_partition_id=backend_partition_id
+            )
+            if profile_id
+            else int(
+                self._conn.execute(
+                    """
                 SELECT COUNT(*)
                 FROM record_block_memberships AS membership
                 JOIN blocks ON blocks.block_id=membership.record_id
@@ -5078,8 +5187,20 @@ class BackendSQLiteIndex:
                   AND membership.role='primary'
                   AND membership.is_current=1
                 """,
-                identity[:3],
-            ).fetchone()[0]
+                    identity[:3],
+                ).fetchone()[0]
+            )
+        )
+        event_filter = "" if profile_id else " AND catalog_revision_id=?"
+        event_params = (
+            (partition.workspace_id, partition.primary_block_id, partition.partition_id)
+            if profile_id
+            else (
+                partition.workspace_id,
+                partition.primary_block_id,
+                partition.partition_id,
+                partition.catalog_revision_id,
+            )
         )
         rows = self._conn.execute(
             """
@@ -5087,10 +5208,11 @@ class BackendSQLiteIndex:
                    success, search_mode, recorded_at
             FROM native_partition_events
             WHERE workspace_id=? AND primary_block_id=?
-              AND catalog_revision_id=? AND partition_id=?
-            ORDER BY id
-            """,
-            identity,
+              AND partition_id=?
+            """
+            + event_filter
+            + " ORDER BY id",
+            event_params,
         ).fetchall()
         write_count = sum(str(row[0]) == "write" for row in rows)
         recall_rows = [row for row in rows if str(row[0]) == "recall"]
@@ -5125,6 +5247,59 @@ class BackendSQLiteIndex:
             last_accessed_at=last_accessed_at,
             health=str(health or "unknown"),
         )
+
+    def partition_health(
+        self,
+        partitions: tuple[tuple[NativePartitionIdentity, str], ...],
+        *,
+        profile_id: str,
+        partition_factory: Callable[[str, str, str], NativePartitionIdentity],
+    ) -> dict[str, Any]:
+        """Read persisted partition observations; never claim current provider readiness."""
+        if not profile_id or any(
+            partition.workspace_id != self.workspace_id for partition, _raw in partitions
+        ):
+            raise ValueError("partition health requires the selected workspace")
+        for partition, raw_id in partitions:
+            expected = partition_factory(
+                partition.primary_block_id, partition.catalog_revision_id, raw_id
+            )
+            if partition != expected:
+                raise ValueError("partition health identity does not match its stable key")
+        identities = dict(partitions)
+        if identities:
+            authorized: dict[str, set[str]] = {}
+            for block_id, _revision, partition_id in self.native_partition_memberships(
+                workspace_id=self.workspace_id,
+                profile_id=profile_id,
+                logical_block_ids=tuple(
+                    dict.fromkeys(part.primary_block_id for part in identities)
+                ),
+            ):
+                authorized.setdefault(block_id, set()).add(partition_id)
+            for identity, partition_id in identities.items():
+                if partition_id not in authorized.get(identity.primary_block_id, set()):
+                    raise ValueError("partition health identity is outside the profile")
+        return {
+            "ok": True,
+            "readiness": "not_probed",
+            "metrics_scope": "native_partition",
+            "profile_id": profile_id,
+            "native_partitions": [partition.to_mapping() for partition in identities],
+            "block_metrics": [
+                {
+                    **self.partition_metrics(
+                        partition,
+                        health="not_probed",
+                        profile_id=profile_id,
+                        backend_partition_id=raw_id,
+                    ).to_mapping(),
+                    "profile_id": profile_id,
+                    "aggregates_catalog_revisions": True,
+                }
+                for partition, raw_id in identities.items()
+            ],
+        }
 
     def record_usage(self, usage: MemoryUsageRecord) -> dict[str, Any]:
         if usage.helped or usage.hurt or usage.outcome in {"helped", "hurt"}:

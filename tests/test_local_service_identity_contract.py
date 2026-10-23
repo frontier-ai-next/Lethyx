@@ -544,7 +544,14 @@ def test_listener_issues_role_scoped_lease_and_rejects_tampered_capabilities(
         listener.close()
 
     assert issued["ok"] is True
-    assert issued["capabilities"] == ["health", "observe", "operation_status", "remember"]
+    assert issued["capabilities"] == [
+        "build_context",
+        "health",
+        "observe",
+        "operation_status",
+        "remember",
+        "resolve_active_mask",
+    ]
     assert isinstance(issued.get("lease"), str)
     assert rejected == {"ok": False, "error": "local service capabilities mismatch"}
 

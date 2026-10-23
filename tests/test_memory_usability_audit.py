@@ -1,7 +1,5 @@
 """Regression coverage for the memory usability audit fixes."""
 
-from __future__ import annotations
-
 import dataclasses
 import json
 from pathlib import Path
@@ -365,6 +363,74 @@ def test_compact_recall_keeps_the_score_scale(monkeypatch) -> None:
     ]
 
 
+def test_packed_compact_recall_preserves_kind_attribution_and_time(monkeypatch) -> None:
+    from um_mem.memory.mcp_facade import _packed_payload_from_records
+
+    monkeypatch.setenv("UM_MEM_MCP_RESPONSE_MODE", "compact")
+    record = dataclasses.replace(
+        _native_record("attributed"),
+        kind="user_preference",
+        metadata={"source_speakers": ["user"], "source_dates": ["2026-10-22"]},
+        valid_from="2026-10-22T00:00:00+00:00",
+        valid_to="2026-10-23T00:00:00+00:00",
+    )
+    packed = _packed_payload_from_records([record], max_tokens=1000, query="preference")
+    assert packed.items
+    result = compact_response("recall", {"ok": True, "hits": list(packed.items)})
+    item = result["items"][0]
+    assert item["record_id"] == record.block_id
+    assert item["kind"] == "user_preference"
+    assert item["source_speakers"] == ["user"]
+    assert item["source_dates"] == ["2026-10-22"]
+    assert item["valid_to"] == record.valid_to
+    assert item["verification_status"] == packed.items[0]["metadata"]["verification_status"]
+    assert item["authority"] == "advisory"
+
+
+def test_compact_active_resolution_preserves_actionable_status_and_budget(
+    tmp_path, monkeypatch
+) -> None:
+    from um_mem.memory.backends.sqlite_index import BackendSQLiteIndex
+
+    monkeypatch.setenv("UM_MEM_MCP_RESPONSE_MODE", "compact")
+    index = BackendSQLiteIndex(tmp_path / "memory.sqlite", backend_id="test", workspace_id="ws")
+    client = MemoryClient(
+        tmp_path, workspace_id="ws", session_id="session", task_id="task", backend_instance=index
+    )
+    try:
+        absent = compact_response(
+            "resolve_active_mask",
+            {"ok": True, "lease": dataclasses.asdict(client.resolve_active_mask())},
+        )["lease"]
+        assert absent["trace"]["resolution_status"] == "not_found"
+        leaf = client.create_leaf_block(
+            name="Focus",
+            synopsis="Current constraints",
+            parent_id=client.block_map()[0]["block_id"],
+            reason="test",
+        )
+        mask = client.set_active_mask(
+            selected_block_ids=(leaf["block_id"],), token_budget=200, activation_reason="test"
+        )
+        for expected in (mask.revision, mask.revision + 1):
+            lease = client.resolve_active_mask(expected_revision=expected, max_tokens=80)
+            compact = compact_response(
+                "resolve_active_mask", {"ok": True, "lease": dataclasses.asdict(lease)}
+            )["lease"]
+            assert compact["trace"]["resolution_status"] == lease.trace.resolution_status
+            assert compact["trace"]["mask_id"] == mask.mask_id
+            assert compact["trace"]["mask_revision"] == lease.trace.mask_revision
+            assert (
+                compact["trace"]["scope_validation_result"] == lease.trace.scope_validation_result
+            )
+            assert compact["token_budget"] == lease.token_budget
+            assert compact["estimated_tokens"] == lease.estimated_tokens
+            assert "visibility" not in compact["trace"]
+        assert compact_response("get_active_mask", {"ok": True, "mask": None})["status"] == "absent"
+    finally:
+        index.close()
+
+
 def test_local_service_route_receipt_keeps_route_decision() -> None:
     from um_mem.memory.mcp_call import _compact_remember_receipt
 
@@ -414,6 +480,55 @@ def test_compact_exact_read_derives_record_and_logical_block_ids(monkeypatch) ->
 
     assert result["record"]["record_id"] == "mem_exact"
     assert result["record"]["logical_block_id"] == "leaf_exact"
+
+
+def test_navigation_reads_only_visible_branch_and_keeps_paths_links(tmp_path, monkeypatch) -> None:
+    from um_mem.memory.backends.sqlite_index import BackendSQLiteIndex
+    from um_mem.memory.catalog_store import WorkspaceCatalogStore
+
+    index = BackendSQLiteIndex(tmp_path / "memory.sqlite", backend_id="test", workspace_id="ws")
+    client = MemoryClient(tmp_path, workspace_id="ws", backend_instance=index)
+    try:
+        root_id = client.block_map()[0]["block_id"]
+        branch = client.create_index_block(
+            name="Branch", synopsis="Branch", parent_id=root_id, reason="test"
+        )
+        leaf = client.create_leaf_block(
+            name="Leaf", synopsis="Leaf", parent_id=branch["block_id"], reason="test"
+        )
+        unrelated = client.create_index_block(
+            name="Unrelated", synopsis="Unrelated", parent_id=root_id, reason="test"
+        )
+        other = client.create_leaf_block(
+            name="Other", synopsis="Other", parent_id=unrelated["block_id"], reason="test"
+        )
+        client.add_block_edge(
+            src_id=leaf["block_id"], dst_id=other["block_id"], edge_type="related_to", reason="test"
+        )
+
+        def forbidden_scan(*args, **kwargs):
+            raise AssertionError("navigation must not enumerate the entire topology")
+
+        monkeypatch.setattr(WorkspaceCatalogStore, "list_blocks", forbidden_scan)
+        seen_edges = []
+        edges_for = WorkspaceCatalogStore.edges_for
+
+        def tracked_edges(self, block_id):
+            seen_edges.append(block_id)
+            return edges_for(self, block_id)
+
+        monkeypatch.setattr(WorkspaceCatalogStore, "edges_for", tracked_edges)
+        overview = client.block_map(depth=1)
+        assert set(overview[0]["child_ids"]) == {branch["block_id"], unrelated["block_id"]}
+        assert "children" not in overview[0]
+        expanded = client.expand_block(branch["block_id"])
+        assert expanded["path_ids"] == [root_id, branch["block_id"]]
+        assert [child["block_id"] for child in expanded["children"]] == [leaf["block_id"]]
+        assert expanded["children"][0]["links"]["related_block_ids"] == [other["block_id"]]
+        assert set(seen_edges) == {branch["block_id"], leaf["block_id"]}
+        assert expanded["children"][0]["writable"] is True
+    finally:
+        index.close()
 
 
 def test_navigation_envelope_projection_drops_raw_provider_diagnostics(monkeypatch) -> None:

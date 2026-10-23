@@ -77,7 +77,7 @@ def test_a_to_b_to_a_recall_never_contaminates_foreign_workspace(tmp_path: Path)
     assert _ids(client_a) == ("fact-a",)
 
 
-def test_only_a_user_global_scope_may_cross_the_workspace_boundary(tmp_path: Path) -> None:
+def test_workspace_backend_never_returns_foreign_workspace_hits(tmp_path: Path) -> None:
     backend = _LeakyBackend()
     client = MemoryClient(
         tmp_path,
@@ -101,7 +101,7 @@ def test_only_a_user_global_scope_may_cross_the_workspace_boundary(tmp_path: Pat
         )
     }
 
-    assert ids == {"fact-a", "global-b"}
+    assert ids == {"fact-a"}
 
 
 def test_project_scope_keeps_the_physical_workspace_filter() -> None:
@@ -111,7 +111,8 @@ def test_project_scope_keeps_the_physical_workspace_filter() -> None:
     user_global_chain = {"scope_chain": ["workspace:alpha", "user_global:u1"]}
 
     assert BackendSQLiteIndex._workspace_scope_filter(project_chain) == ("alpha",)
-    assert BackendSQLiteIndex._workspace_scope_filter(user_global_chain) == ()
+    assert BackendSQLiteIndex._workspace_scope_filter(user_global_chain) == ("alpha",)
+    assert BackendSQLiteIndex._workspace_scope_filter({"scope_chain": ["user_global:u1"]}) == ()
 
 
 def test_cross_workspace_isolation_is_declared_only_for_user_global_blocks() -> None:

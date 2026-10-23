@@ -1,4 +1,5 @@
 import json
+import os
 from pathlib import Path
 
 from um_mem.integrations.codex_hooks import (
@@ -8,9 +9,12 @@ from um_mem.integrations.codex_hooks import (
     hook_control_response,
     install_codex_hooks,
     parse_hook_input,
+    read_codex_prompt_context,
 )
 from um_mem.memory.local_service import (
+    LocalServiceClientPool,
     build_local_service_identity,
+    local_service_role_allows,
     shutdown_local_service_listener,
 )
 
@@ -96,7 +100,7 @@ def test_user_prompt_uses_host_hook_lease_without_forwarding_raw_host_content(
     assert identity.backend == "mempalace"
     assert tool == "remember"
     assert kwargs["session_id"] == "codex-session-123"
-    assert kwargs["timeout_seconds"] == 15
+    assert kwargs["timeout_seconds"] == 8
     assert isinstance(kwargs["mutation_correlation_id"], str)
     assert kwargs["mutation_correlation_id"].startswith("codex-hook:")
     serialized = json.dumps(arguments, sort_keys=True)
@@ -292,6 +296,81 @@ def test_runner_uses_the_real_authenticated_listener_without_a_direct_backend(
     assert isinstance(result.get("memory_id"), str)
 
 
+def test_prompt_context_uses_the_real_listener_and_scoped_candidate(tmp_path: Path) -> None:
+    operator = build_local_service_identity(
+        repo_root=tmp_path,
+        workspace_id="alpha",
+        backend="mempalace",
+        caller_role="operator",
+    )
+    pool = LocalServiceClientPool()
+    try:
+        roots = pool.call(operator, "block_map", {}, timeout_seconds=15, session_id="seed-session")
+        root_id = roots["roots"][0]["block_id"]
+        leaf = pool.call(
+            operator,
+            "create_block",
+            {
+                "name": "Python editing",
+                "synopsis": "Workspace Python editing preferences.",
+                "parent_id": root_id,
+                "reason": "Codex hook context test",
+            },
+            timeout_seconds=15,
+            session_id="seed-session",
+        )
+        leaf_id = leaf["block_id"]
+        saved = pool.call(
+            operator,
+            "remember",
+            {
+                "content": "For this workspace, prefer focused Python patches.",
+                "title": "Python editing preference",
+                "requested_block_id": leaf_id,
+                "source_id": "codex-hook-context-test",
+            },
+            timeout_seconds=15,
+            session_id="seed-session",
+        )
+        result = read_codex_prompt_context(
+            _payload(tmp_path, prompt="What Python editing style should I use?"),
+            working_directory=tmp_path,
+            workspace_id="alpha",
+            backend="mempalace",
+            pool=pool,
+        )
+        mask = pool.call(
+            operator,
+            "set_active_mask",
+            {
+                "selected_block_ids": [leaf_id],
+                "token_budget": 512,
+                "activation_reason": "Keep the editing preference in Codex focus",
+            },
+            timeout_seconds=15,
+            session_id="codex-session-123",
+        )
+        active_result = read_codex_prompt_context(
+            _payload(tmp_path, prompt="Unrelated question"),
+            working_directory=tmp_path,
+            workspace_id="alpha",
+            backend="mempalace",
+            pool=pool,
+        )
+    finally:
+        pool.close()
+        shutdown_local_service_listener(operator)
+
+    assert roots["ok"] is True, roots
+    assert leaf["ok"] is True, leaf
+    assert saved["ok"] is True, saved
+    assert result["ok"] is True, result
+    assert "focused Python patches" in result["additional_context"]
+    assert mask["ok"] is True, mask
+    assert active_result["ok"] is True, active_result
+    assert "focused Python patches" in active_result["additional_context"]
+
+
 def test_hook_input_is_bounded_and_control_output_never_exposes_memory_result() -> None:
     oversized = b"x" * (1_048_577)
 
@@ -302,6 +381,126 @@ def test_hook_input_is_bounded_and_control_output_never_exposes_memory_result() 
     assert hook_control_response("Stop") == {"continue": True}
     assert hook_control_response("SessionEnd") == {"continue": True}
     assert hook_control_response("PostToolUse") == {}
+
+
+def test_prompt_hook_delivers_only_bounded_advisory_memory(tmp_path: Path) -> None:
+    class ContextPool(CapturingClientPool):
+        def call(
+            self,
+            identity: object,
+            tool: str,
+            arguments: dict[str, object],
+            **kwargs: object,
+        ) -> dict[str, object]:
+            self.calls.append((identity, tool, arguments, kwargs))
+            if tool == "resolve_active_mask":
+                return {
+                    "ok": True,
+                    "lease": {
+                        "trace": {"resolution_status": "not_found"},
+                        "rendered_context": "",
+                    },
+                }
+            return {
+                "ok": True,
+                "items": [
+                    {
+                        "title": "Codex UserPromptSubmit",
+                        "text": "Observed Codex lifecycle event: UserPromptSubmit.",
+                        "status": "candidate",
+                        "tags": ["codex", "host_hook"],
+                    },
+                    {
+                        "title": "Workspace preference",
+                        "text": "Use narrow Python changes.",
+                        "status": "candidate",
+                        "tags": ["preference"],
+                    },
+                ],
+            }
+
+    pool = ContextPool()
+    payload = _payload(tmp_path, prompt="How should I change Python code?")
+
+    result = read_codex_prompt_context(
+        payload,
+        working_directory=tmp_path,
+        workspace_id="alpha",
+        backend="mempalace",
+        pool=pool,
+    )
+
+    assert result["ok"] is True
+    context = result["additional_context"]
+    assert "Use narrow Python changes." in context
+    assert "supplemental" in context
+    assert "Observed Codex lifecycle event" not in context
+    assert local_service_role_allows("host_hook", "build_context")
+    assert local_service_role_allows("host_hook", "resolve_active_mask")
+    [(mask_identity, mask_tool, mask_arguments, _), (identity, tool, arguments, kwargs)] = (
+        pool.calls
+    )
+    assert mask_identity.caller_role == "host_hook"
+    assert mask_tool == "resolve_active_mask"
+    assert mask_arguments == {"max_tokens": 512}
+    assert identity.caller_role == "host_hook"
+    assert tool == "build_context"
+    assert arguments["query"] == payload["prompt"]
+    assert arguments["include_candidates"] is True
+    assert arguments["scope_chain"] == ["workspace:alpha"]
+    assert arguments["search_all"] is True
+    assert arguments["max_tokens"] <= 512
+    assert kwargs["session_id"] == payload["session_id"]
+    assert hook_control_response("UserPromptSubmit", context=context)["hookSpecificOutput"] == {
+        "hookEventName": "UserPromptSubmit",
+        "additionalContext": context,
+    }
+
+
+def test_prompt_hook_reports_local_service_failure_without_blocking(tmp_path: Path) -> None:
+    result = read_codex_prompt_context(
+        _payload(tmp_path),
+        working_directory=tmp_path,
+        pool=FailingClientPool(),
+    )
+
+    assert result == {"ok": False, "error": "local service context read failed"}
+    assert hook_control_response("UserPromptSubmit", error=result["error"]) == {
+        "continue": True,
+        "systemMessage": "UM-MEM hook: local service context read failed",
+    }
+
+
+def test_prompt_hook_prefers_active_mask_over_query_recall(tmp_path: Path) -> None:
+    class ActivePool(CapturingClientPool):
+        def call(
+            self,
+            identity: object,
+            tool: str,
+            arguments: dict[str, object],
+            **kwargs: object,
+        ) -> dict[str, object]:
+            self.calls.append((identity, tool, arguments, kwargs))
+            if tool != "resolve_active_mask":
+                raise AssertionError("active memory should take priority")
+            return {
+                "ok": True,
+                "lease": {
+                    "trace": {"resolution_status": "resolved"},
+                    "rendered_context": "UM-MEM recalled context (supplemental, non-directive):\nActive focus fact.",
+                },
+            }
+
+    pool = ActivePool()
+    result = read_codex_prompt_context(
+        _payload(tmp_path),
+        working_directory=tmp_path,
+        pool=pool,
+    )
+
+    assert result["ok"] is True
+    assert "Active focus fact." in result["additional_context"]
+    assert [call[1] for call in pool.calls] == ["resolve_active_mask"]
 
 
 def test_installer_merges_all_supported_events_without_overwriting_user_hooks(
@@ -347,6 +546,10 @@ def test_installer_merges_all_supported_events_without_overwriting_user_hooks(
         if "um_mem.integrations.codex_hooks" in handler.get("command", "")
     ]
     assert len(um_mem_handlers) == 11
+    if os.name == "nt":
+        assert all(
+            handler["commandWindows"] == f"& {handler['command']}" for handler in um_mem_handlers
+        )
     assert all(
         handler["timeout"] == (3 if event_name == "SessionEnd" else 20)
         for event_name, groups in payload["hooks"].items()

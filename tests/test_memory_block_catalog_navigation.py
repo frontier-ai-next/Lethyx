@@ -357,7 +357,9 @@ def test_expand_leaf_exposes_content_free_operational_routing_metadata(
     class Backend:
         block_id = ""
 
-        def health(self) -> dict[str, object]:
+        def block_health(self, logical_block_ids, *, profile_id) -> dict[str, object]:
+            assert logical_block_ids == (self.block_id,)
+            assert profile_id == "default"
             partition = {
                 "backend_id": "mempalace",
                 "workspace_id": "alpha",
@@ -368,6 +370,7 @@ def test_expand_leaf_exposes_content_free_operational_routing_metadata(
                 "partition_mode": "native_collection_family",
             }
             return {
+                "readiness": "not_probed",
                 "native_partitions": [partition],
                 "block_metrics": [
                     {
@@ -377,7 +380,7 @@ def test_expand_leaf_exposes_content_free_operational_routing_metadata(
                         "hit_count": 2,
                         "latency_p50_ms": 8.0,
                         "latency_p95_ms": 13.0,
-                        "health": "ready",
+                        "health": "not_probed",
                     }
                 ],
             }

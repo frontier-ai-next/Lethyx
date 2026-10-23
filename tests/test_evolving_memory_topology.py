@@ -317,6 +317,7 @@ def test_split_and_merge_require_exact_record_coverage_and_preserve_provenance(
             == 0
         )
         assert client.expand_block(target_a["block_id"])["root"]["record_count"] == 1
+        assert client.expand_block(target_a["block_id"])["root"]["metrics"]["record_count"] == 1
         assert client.expand_block(target_b["block_id"])["root"]["record_count"] == 1
         assert (
             backend.get_block(first.memory_id).block_membership.primary_block_id

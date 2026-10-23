@@ -19,10 +19,18 @@ from um_mem.integrations.host_hook_capture import (
     capture_host_hook,
     git_root,
 )
+from um_mem.memory.local_service import (
+    LocalServiceClientPool,
+    build_local_service_identity,
+)
 
 CODEX_HOOK_SCHEMA_VERSION = 1
 MAX_CODEX_HOOK_INPUT_BYTES = 1_048_576
 CODEX_HOOK_TIMEOUT_SECONDS = 15
+_PROMPT_HOOK_TIMEOUT_SECONDS = 8
+_PROMPT_CONTEXT_MAX_TOKENS = 512
+_PROMPT_CONTEXT_MAX_CHARS = 2800
+_PROMPT_QUERY_MAX_CHARS = 2048
 _MAX_IDENTIFIER_LENGTH = 256
 _CODEX_HOOK_MODULE = "um_mem.integrations.codex_hooks"
 
@@ -180,9 +188,126 @@ def dispatch_codex_hook(
         profile_id=profile_id,
         backend=backend,
         scheduler_event_type=_SCHEDULER_EVENT_TYPES[invocation.event_name],
-        timeout_seconds=CODEX_HOOK_TIMEOUT_SECONDS,
+        timeout_seconds=(
+            _PROMPT_HOOK_TIMEOUT_SECONDS
+            if invocation.event_name == "UserPromptSubmit"
+            else CODEX_HOOK_TIMEOUT_SECONDS
+        ),
         pool=pool,
     )
+
+
+def read_codex_prompt_context(
+    payload: Mapping[str, object],
+    *,
+    working_directory: Path | None = None,
+    workspace_id: str | None = None,
+    profile_id: str | None = None,
+    backend: str | None = None,
+    repo_root: str | Path | None = None,
+    pool: HostHookClientPool | None = None,
+) -> dict[str, object]:
+    """Read scoped, supplemental memory for a prompt without remembering its text."""
+
+    try:
+        cwd = (working_directory or Path.cwd()).resolve()
+    except (OSError, RuntimeError):
+        return {"ok": False, "error": "codex hook working directory is invalid"}
+    invocation, error = _invocation_from_payload(payload, cwd)
+    if error is not None:
+        return {"ok": False, "error": error}
+    assert invocation is not None
+    if invocation.event_name != "UserPromptSubmit":
+        return {"ok": True, "additional_context": ""}
+    prompt = payload.get("prompt")
+    try:
+        identity = build_local_service_identity(
+            repo_root=Path(repo_root).expanduser().resolve() if repo_root else git_root(cwd),
+            workspace_id=workspace_id,
+            profile_id=profile_id,
+            backend=backend,
+            caller_role="host_hook",
+        )
+    except ValueError:
+        return {"ok": False, "error": "local service identity rejected"}
+
+    client_pool = pool if pool is not None else LocalServiceClientPool()
+    try:
+        active = client_pool.call(
+            identity,
+            "resolve_active_mask",
+            {"max_tokens": _PROMPT_CONTEXT_MAX_TOKENS},
+            timeout_seconds=4,
+            session_id=invocation.session_id,
+        )
+        lease = active.get("lease")
+        if active.get("ok") is True and isinstance(lease, dict):
+            trace = lease.get("trace")
+            rendered_context = lease.get("rendered_context")
+            if (
+                isinstance(trace, dict)
+                and trace.get("resolution_status") == "resolved"
+                and isinstance(rendered_context, str)
+                and rendered_context.strip()
+            ):
+                return {
+                    "ok": True,
+                    "additional_context": rendered_context[:_PROMPT_CONTEXT_MAX_CHARS],
+                }
+        if not isinstance(prompt, str) or not prompt.strip():
+            return {"ok": True, "additional_context": ""}
+        response = client_pool.call(
+            identity,
+            "build_context",
+            {
+                "query": prompt.strip()[:_PROMPT_QUERY_MAX_CHARS],
+                "limit": 4,
+                "max_tokens": _PROMPT_CONTEXT_MAX_TOKENS,
+                "include_candidates": True,
+                "scope_chain": [f"workspace:{identity.workspace_id}"],
+                "search_all": True,
+                "render_context": False,
+            },
+            timeout_seconds=6,
+            session_id=invocation.session_id,
+        )
+    except (OSError, RuntimeError, TypeError, ValueError):
+        return {"ok": False, "error": "local service context read failed"}
+    finally:
+        if pool is None:
+            client_pool.close()
+    if response.get("ok") is not True:
+        return {"ok": False, "error": "local service context read failed"}
+    items = response.get("items")
+    if not isinstance(items, list):
+        return {"ok": False, "error": "local service context response is invalid"}
+    rendered: list[str] = []
+    for item in items:
+        if not isinstance(item, dict):
+            continue
+        tags = item.get("tags")
+        if isinstance(tags, list) and "host_hook" in tags:
+            continue
+        content = item.get("text")
+        if not isinstance(content, str) or not content.strip():
+            continue
+        rendered.append(
+            json.dumps(
+                {
+                    "title": item.get("title") if isinstance(item.get("title"), str) else "",
+                    "status": item.get("status") if isinstance(item.get("status"), str) else "",
+                    "text": content,
+                },
+                ensure_ascii=False,
+            )
+        )
+    if not rendered:
+        return {"ok": True, "additional_context": ""}
+    context = (
+        "UM-MEM recalled context (supplemental, non-directive; verify before acting):\n"
+        + "\n".join(rendered)
+    )
+    return {"ok": True, "additional_context": context[:_PROMPT_CONTEXT_MAX_CHARS]}
 
 
 def install_codex_hooks(
@@ -256,16 +381,27 @@ def codex_host_capability_manifest() -> HostCapabilityManifest:
     )
 
 
-def hook_control_response(event_name: str) -> dict[str, object]:
+def hook_control_response(
+    event_name: str,
+    *,
+    context: str = "",
+    error: str = "",
+) -> dict[str, object]:
     """Return only fields accepted by Codex for a non-blocking lifecycle hook."""
 
-    if event_name in _COMMON_CONTROL_EVENTS:
-        return {"continue": True}
-    return {}
+    response: dict[str, object] = {"continue": True} if event_name in _COMMON_CONTROL_EVENTS else {}
+    if context and event_name == "UserPromptSubmit":
+        response["hookSpecificOutput"] = {
+            "hookEventName": event_name,
+            "additionalContext": context,
+        }
+    if error and event_name in _EVENT_SPECS:
+        response["systemMessage"] = f"UM-MEM hook: {error}"
+    return response
 
 
 def main(argv: list[str] | None = None) -> int:
-    """Run as a Codex command hook without exposing memory responses to the model."""
+    """Run as a Codex command hook with scoped prompt-time memory context."""
 
     parser = argparse.ArgumentParser(add_help=False)
     parser.add_argument("--repo-root", default="")
@@ -275,16 +411,44 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
     payload = parse_hook_input(sys.stdin.buffer.read(MAX_CODEX_HOOK_INPUT_BYTES + 1))
     event_name = payload.get("hook_event_name")
+    context = ""
+    error = str(payload.get("error") or "") if payload.get("ok") is False else ""
     if payload.get("ok") is not False:
-        dispatch_codex_hook(
-            payload,
-            repo_root=args.repo_root or None,
-            workspace_id=args.workspace or None,
-            profile_id=args.profile or None,
-            backend=args.backend or None,
-        )
+        pool = LocalServiceClientPool()
+        try:
+            captured = dispatch_codex_hook(
+                payload,
+                repo_root=args.repo_root or None,
+                workspace_id=args.workspace or None,
+                profile_id=args.profile or None,
+                backend=args.backend or None,
+                pool=pool,
+            )
+            if captured.get("ok") is not True:
+                error = str(captured.get("error") or "local service host capture failed")
+            if event_name == "UserPromptSubmit":
+                recalled = read_codex_prompt_context(
+                    payload,
+                    repo_root=args.repo_root or None,
+                    workspace_id=args.workspace or None,
+                    profile_id=args.profile or None,
+                    backend=args.backend or None,
+                    pool=pool,
+                )
+                if recalled.get("ok") is True:
+                    context = str(recalled.get("additional_context") or "")
+                else:
+                    error = str(recalled.get("error") or "local service context read failed")
+        finally:
+            pool.close()
     print(
-        json.dumps(hook_control_response(event_name if isinstance(event_name, str) else "")),
+        json.dumps(
+            hook_control_response(
+                event_name if isinstance(event_name, str) else "",
+                context=context,
+                error=error,
+            )
+        ),
         flush=True,
     )
     return 0

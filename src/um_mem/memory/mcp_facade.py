@@ -66,7 +66,7 @@ from um_mem.memory.context_payload import (
 )
 from um_mem.memory.kernel.telemetry import record_memory_event
 from um_mem.memory.obsidian_export import export_backend_to_obsidian
-from um_mem.memory.paths import normalize_workspace_id
+from um_mem.memory.paths import MANAGER_WORKSPACE_ID, normalize_workspace_id
 from um_mem.memory.query_analysis import EvidenceRequirement
 from um_mem.memory.recall_plan import RecallPlan, RetrievalMode, SourceHorizon
 from um_mem.memory.recall_strategy import (
@@ -204,6 +204,13 @@ def bound_mcp_client(client: MemoryClient) -> Iterator[MemoryClient]:
 
 
 def _close_client(client: MemoryClient) -> None:
+    manager = client._manager_client_cache
+    if manager is not None:
+        manager_backend = manager._backend
+        close_manager = getattr(manager_backend, "close", None)
+        if callable(close_manager):
+            close_manager()
+        client._manager_client_cache = None
     if client is _BOUND_LOCAL_SERVICE_CLIENT.get():
         return
     backend = getattr(client, "_backend", None)
@@ -1231,6 +1238,8 @@ def _recall_records_scoped(
     as_of: str = "",
     known_as_of: str = "",
     revision_id: str = "",
+    include_manager: bool = False,
+    manager_scope_allowed: bool = False,
 ) -> tuple[list[MemoryBlockRecord], dict[str, Any]]:
     explicit_tags = list(tags or [])
     plan = _compile_context_recall_plan(
@@ -1288,6 +1297,46 @@ def _recall_records_scoped(
         )
     )
     records = _apply_plan_to_records(records[:limit], plan)
+    if include_manager and manager_scope_allowed and client.user_id and len(records) < limit:
+        manager_backend = None
+        for hit in client._manager_hits(plan):
+            block_id = str(hit.metadata.get("block_id") or "")
+            if not block_id:
+                continue
+            if manager_backend is None:
+                manager_backend = client._manager_client().backend
+            record = manager_backend.get_block(block_id, workspace_id=MANAGER_WORKSPACE_ID)
+            if (
+                not isinstance(record, MemoryBlockRecord)
+                or record.workspace_id != MANAGER_WORKSPACE_ID
+                or record.user_id != client.user_id
+                or not _record_allowed_for_context(
+                    record,
+                    scope_chain=(f"user_global:{client.user_id}",),
+                    run_id=plan.run_id,
+                    profile_id=client.profile_id,
+                    source_horizon=plan.source_horizon,
+                    include_candidates=plan.include_candidates,
+                    record_ids=plan.record_ids,
+                    temporal_mode=plan.temporal_mode,
+                    as_of=plan.as_of,
+                    known_as_of=plan.known_as_of,
+                )
+            ):
+                continue
+            records.append(
+                replace(
+                    record,
+                    authority="advisory",
+                    metadata={
+                        **dict(record.metadata or {}),
+                        "memory_level": "manager",
+                        **({"retrieval_score": hit.score} if hit.score is not None else {}),
+                    },
+                )
+            )
+            if len(records) >= limit:
+                break
     diagnostics.update(_record_activity_counts(records))
     return records, diagnostics
 
@@ -1334,15 +1383,11 @@ def um_mem_block_map(
     repo_root: str = "",
     depth: int = 1,
     include_meta: bool = False,
+    child_limit: int = 50,
 ) -> dict[str, Any]:
     client = _client(repo_root=repo_root, workspace_id=workspace_id, backend=backend)
     try:
-        if depth == 1 and not include_meta:
-            roots = client.block_map()
-        elif depth == 1:
-            roots = client.block_map(include_meta=True)
-        else:
-            roots = client.block_map(depth=depth, include_meta=include_meta)
+        roots = client.block_map(depth=depth, include_meta=include_meta, child_limit=child_limit)
         return {
             "ok": True,
             "workspace_id": client.workspace_id,
@@ -1364,10 +1409,12 @@ def um_mem_expand_block(
     workspace_id: str = "",
     backend: str = "",
     repo_root: str = "",
+    limit: int = 50,
+    cursor: str = "",
 ) -> dict[str, Any]:
     client = _client(repo_root=repo_root, workspace_id=workspace_id, backend=backend)
     try:
-        expanded = _as_jsonable(client.expand_block(block_id))
+        expanded = _as_jsonable(client.expand_block(block_id, limit=limit, cursor=cursor))
         if isinstance(expanded, dict):
             for value in (expanded.get("root"), *(expanded.get("children") or ())):
                 if not isinstance(value, dict):
@@ -1401,10 +1448,15 @@ def um_mem_navigation_envelope(
     workspace_id: str = "",
     backend: str = "",
     repo_root: str = "",
+    limit: int = 50,
+    cursor: str = "",
 ) -> dict[str, Any]:
     client = _client(repo_root=repo_root, workspace_id=workspace_id, backend=backend)
     try:
-        return {"ok": True, **_as_jsonable(client.navigation_envelope(block_id))}
+        return {
+            "ok": True,
+            **_as_jsonable(client.navigation_envelope(block_id, limit=limit, cursor=cursor)),
+        }
     except Exception as exc:
         return {**_safe_error(exc), "workspace_id": client.workspace_id}
     finally:
@@ -3040,6 +3092,7 @@ def um_mem_recall(
     as_of: str = "",
     known_as_of: str = "",
     revision_id: str = "",
+    include_manager: bool = False,
 ) -> dict[str, Any]:
     started_ns = perf_counter_ns()
     client = _client(
@@ -3077,6 +3130,9 @@ def um_mem_recall(
             as_of=as_of,
             known_as_of=known_as_of,
             revision_id=revision_id,
+            include_manager=include_manager,
+            manager_scope_allowed=scope_chain is None
+            or f"user_global:{client.user_id}" in effective_scope_chain,
         )
         if source_speakers:
             selected_speakers = {speaker.strip().casefold() for speaker in source_speakers}
@@ -3140,6 +3196,7 @@ def um_mem_recall(
             "source_horizon": source_horizon,
             "scope_chain": list(effective_scope_chain),
             "include_candidates": include_candidates,
+            "include_manager": include_manager,
             "run_id": run_id,
             "diagnostics": _agent_diagnostics(diagnostics),
             "hits": hits,
@@ -3201,6 +3258,7 @@ def um_mem_build_context(
     as_of: str = "",
     known_as_of: str = "",
     revision_id: str = "",
+    include_manager: bool = False,
 ) -> dict[str, Any]:
     started_ns = perf_counter_ns()
     client = _client(
@@ -3240,6 +3298,9 @@ def um_mem_build_context(
             as_of=as_of,
             known_as_of=known_as_of,
             revision_id=revision_id,
+            include_manager=include_manager,
+            manager_scope_allowed=scope_chain is None
+            or f"user_global:{client.user_id}" in effective_scope_chain,
         )
         context_budget = int(diagnostics.get("allocated_context_token_budget", max_tokens))
         selection_context = SelectionContext(
@@ -3251,10 +3312,22 @@ def um_mem_build_context(
             historical=temporal_mode == "historical" or bool(known_as_of),
             as_of="" if known_as_of else as_of,
         )
+        manager_selection = (
+            replace(selection_context, scope_chain=(f"user_global:{client.user_id}",))
+            if include_manager and client.user_id
+            else None
+        )
         renderable_records = [
             record
             for record in records
-            if MemorySelectionPolicy().eligible_for_overlay(record, selection_context)
+            if MemorySelectionPolicy().eligible_for_overlay(
+                record,
+                manager_selection
+                if manager_selection is not None
+                and record.workspace_id == MANAGER_WORKSPACE_ID
+                and record.metadata.get("memory_level") == "manager"
+                else selection_context,
+            )
         ]
         if source_speakers:
             selected_speakers = {speaker.strip().casefold() for speaker in source_speakers}
@@ -3315,6 +3388,7 @@ def um_mem_build_context(
             "workspace_id": client.workspace_id,
             "run_id": run_id,
             "backend": _default_backend(backend),
+            "include_manager": include_manager,
             "delivery_policy": "on_demand",
             "authority": "advisory",
             "diagnostics": _agent_diagnostics(diagnostics),

@@ -26,11 +26,20 @@ settings in `$CODEX_HOME/config.toml` (or `~/.codex/config.toml`) and hooks in
 `$CODEX_HOME/hooks.json` (or `~/.codex/hooks.json`). Restart the host and verify
 the MCP server from its own MCP list or panel. Codex also requires reviewing and
 trusting newly installed user hooks in `/hooks` before they run.
+On Windows, the installer writes `commandWindows` as a PowerShell invocation;
+reinstall existing Codex hooks after upgrading so their commands can execute.
 
 The status command checks saved configuration only. It does not launch either
 host or prove a live tool call. MCP is tools-only: these two integrations do not
 deliver an exact active-memory mask before every model round. Hooks are
 best-effort, advisory lifecycle observations and cannot block the host task.
+On `UserPromptSubmit`, the Codex hook first resolves the active mask for that
+exact session. If it has no usable context, the hook retrieves bounded workspace
+memory by prompt and passes it as supplemental context. Candidate records may
+appear in the fallback as unverified evidence; lifecycle-only hook records are
+omitted. This runs at the prompt boundary, not before every internal model
+request. An active mask must be deliberately set for the Codex session; a mask
+from another session is not inherited.
 Claude/Codex `Stop` events mean a completed response/turn; only `SessionEnd`
 means the session ended.
 

@@ -64,7 +64,10 @@ nav:
       - Backends: backends.md
   - Operate:
       - Operator guide: operator_guide.md
+      - Live local panel: live_panel.md
       - Troubleshooting: troubleshooting.md
   - Maintain:
       - Guide for agents and contributors: agent_guide.md
       - Developer profiling: developer_profiling.md
+      - Memory methodology: memory_methodology.md
+      - Evaluation protocol: memory_eval_protocol.md

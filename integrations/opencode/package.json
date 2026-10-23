@@ -1,0 +1,17 @@
+{
+  "name": "@um-mem/opencode",
+  "version": "0.1.0",
+  "type": "module",
+  "description": "Session-bound UM-MEM tools and active context for OpenCode V2",
+  "exports": "./index.js",
+  "files": ["index.js", "dist", "README.md"],
+  "scripts": {
+    "build": "tsc",
+    "test": "npm run build && node --test test/*.test.mjs"
+  },
+  "engines": {"node": ">=20"},
+  "peerDependencies": {"@opencode/plugin": "^2.1.3"},
+  "dependencies": {"@modelcontextprotocol/sdk": "^1.27.1"},
+  "devDependencies": {"@opencode/plugin": "2.1.3", "@types/node": "^24.0.0", "typescript": "^5.9.3"},
+  "license": "MIT"
+}

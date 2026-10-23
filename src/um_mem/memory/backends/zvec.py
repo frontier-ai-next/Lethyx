@@ -306,6 +306,38 @@ class ZvecBackend(BackendSQLiteIndex):
             "native_projection": projection,
         }
 
+    def block_health(
+        self, logical_block_ids: tuple[str, ...], *, profile_id: str
+    ) -> dict[str, Any]:
+        if not profile_id or not 1 <= len(logical_block_ids) <= 201:
+            raise ValueError("block health requires a profile and 1-201 selected block IDs")
+        partitions = tuple(
+            (
+                self.native_partition_identity(
+                    workspace_id=self.workspace_id,
+                    primary_block_id=block_id,
+                    catalog_revision_id=revision_id,
+                    backend_partition_id=partition_id,
+                ),
+                partition_id,
+            )
+            for block_id, revision_id, partition_id in self.native_partition_memberships(
+                workspace_id=self.workspace_id,
+                profile_id=profile_id,
+                logical_block_ids=logical_block_ids,
+            )
+        )
+        return self.partition_health(
+            partitions,
+            profile_id=profile_id,
+            partition_factory=lambda block, revision, raw: self.native_partition_identity(
+                primary_block_id=block,
+                workspace_id=self.workspace_id,
+                catalog_revision_id=revision,
+                backend_partition_id=raw,
+            ),
+        )
+
     def ensure_banks(self, *, workspace_id: str = "") -> dict[str, Any]:
         return {"ok": True, "backend": "zvec", "workspace_id": workspace_id or self.workspace_id}
 

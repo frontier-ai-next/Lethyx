@@ -59,7 +59,7 @@ def install_project_hooks(
         if codex_command_fields:
             handler.update(
                 {
-                    "commandWindows": command,
+                    "commandWindows": f"& {command}" if os.name == "nt" else command,
                     "statusMessage": "Capturing UM-MEM lifecycle",
                 }
             )

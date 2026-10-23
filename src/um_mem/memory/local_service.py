@@ -210,7 +210,16 @@ _LOCAL_SERVICE_ROLE_TOOLS: dict[str, frozenset[str]] = {
             "export_obsidian",
         }
     ),
-    "host_hook": frozenset({"health", "observe", "remember", "operation_status"}),
+    "host_hook": frozenset(
+        {
+            "health",
+            "observe",
+            "remember",
+            "build_context",
+            "resolve_active_mask",
+            "operation_status",
+        }
+    ),
     "host_state": frozenset({"health"}),
 }
 _LOCAL_SERVICE_PRIVATE_CAPABILITIES: dict[str, frozenset[str]] = {

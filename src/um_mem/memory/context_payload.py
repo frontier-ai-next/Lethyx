@@ -76,6 +76,7 @@ _CONTEXT_METADATA_KEYS = {
 }
 _CONTEXT_ITEM_KEYS = (
     "authority",
+    "kind",
     "rank",
     "score",
     "source",

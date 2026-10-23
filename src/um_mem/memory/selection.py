@@ -161,7 +161,8 @@ class MemorySelectionPolicy:
 
         metadata = dict(block.metadata or {})
         return bool(
-            str(metadata.get("evidence_kind") or "").strip() == "agent_tool_claim"
+            str(metadata.get("evidence_kind") or "").strip()
+            in {"agent_tool_claim", "user_statement", "user_stated"}
             and block.retention == "durable"
             and block.scope in {"workspace", "project", "user_global"}
             and block.authority == "advisory"

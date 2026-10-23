@@ -1,7 +1,5 @@
 """Regressions found by exercising the public MCP memory workflow."""
 
-from __future__ import annotations
-
 from types import SimpleNamespace
 
 import pytest
@@ -11,7 +9,10 @@ from um_mem.memory import mcp_facade, mcp_server
 from um_mem.memory.selection import MemorySelectionPolicy, SelectionContext
 
 
-def test_default_mcp_remember_is_recallable_in_another_run(tmp_path, monkeypatch) -> None:
+@pytest.mark.parametrize("evidence_kind", ["agent_tool_claim", "user_statement", "user_stated"])
+def test_default_mcp_remember_is_recallable_in_another_run(
+    tmp_path, monkeypatch, evidence_kind
+) -> None:
     monkeypatch.setenv("UM_MEM_SEMANTIC", "0")
     writer = MemoryClient(tmp_path, workspace_id="shared", backend="mnemosyne")
     root = writer.block_map()[0]
@@ -29,12 +30,13 @@ def test_default_mcp_remember_is_recallable_in_another_run(tmp_path, monkeypatch
         workspace_id="shared",
         backend="mnemosyne",
         run_id="codex-run",
+        evidence_kind=evidence_kind,
     )
 
     assert saved["saved"] is True
     reader = MemoryClient(tmp_path, workspace_id="shared", backend="mnemosyne")
     record = reader.read_exact_record(record_id=saved["memory_id"])
-    assert record.metadata["evidence_kind"] == "agent_tool_claim"
+    assert record.metadata["evidence_kind"] == evidence_kind
     assert MemorySelectionPolicy().eligible_for_recall(
         record,
         SelectionContext(
@@ -42,6 +44,24 @@ def test_default_mcp_remember_is_recallable_in_another_run(tmp_path, monkeypatch
             scope_chain=("workspace:shared",),
             run_id="opencode-run",
             include_candidates=True,
+        ),
+    )
+    assert not MemorySelectionPolicy().eligible_for_directive(
+        record,
+        SelectionContext(
+            query="Vega maintenance window",
+            scope_chain=("workspace:shared",),
+            run_id="opencode-run",
+            include_candidates=True,
+        ),
+    )
+    assert not MemorySelectionPolicy().eligible_for_recall(
+        record,
+        SelectionContext(
+            query="Vega maintenance window",
+            scope_chain=("workspace:shared",),
+            run_id="opencode-run",
+            include_candidates=False,
         ),
     )
 
@@ -64,6 +84,25 @@ def test_default_mcp_remember_is_recallable_in_another_run(tmp_path, monkeypatch
     )
     assert local_arguments["run_id"] == "opencode-run"
     assert saved["memory_id"] in [hit["metadata"]["block_id"] for hit in recalled["hits"]]
+
+
+@pytest.mark.parametrize("name", ["recall", "build_context"])
+@pytest.mark.parametrize("backend", ["mnemosyne", "hindsight"])
+def test_unsupported_hybrid_fails_before_backend_fallback(monkeypatch, name, backend) -> None:
+    identity = SimpleNamespace(
+        repo_root="store", workspace_id="ws", profile_id="default", backend=backend
+    )
+    monkeypatch.setattr(mcp_server, "build_local_service_identity", lambda **_kwargs: identity)
+    monkeypatch.setattr(
+        mcp_server,
+        "_service_call",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(AssertionError("service called")),
+    )
+
+    result = mcp_server._call_tool(name, {"query": "fact", "retrieval_mode": "hybrid"})
+
+    assert result["reason_code"] == "unsupported_retrieval_mode"
+    assert result["supported_retrieval_modes"] == ["semantic"]
 
 
 def test_duplicate_warning_requires_content_overlap(monkeypatch) -> None:

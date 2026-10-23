@@ -29,6 +29,7 @@ class FacadeBackend:
 
 class FacadeClient:
     workspace_id = "alpha"
+    user_id = ""
     repo_root = Path("unused")
 
     def __init__(self) -> None:
@@ -114,10 +115,10 @@ def test_mcp_and_hermes_expose_root_map_and_selected_branch_expansion(monkeypatc
         workspace_id = "alpha"
         repo_root = Path("unused")
 
-        def block_map(self) -> list[dict[str, Any]]:
+        def block_map(self, *, depth=1, include_meta=False, child_limit=50) -> list[dict[str, Any]]:
             return [{"block_id": "semantic_memory_index", "child_ids": ["project_facts"]}]
 
-        def expand_block(self, block_id: str) -> dict[str, Any]:
+        def expand_block(self, block_id: str, *, limit=50, cursor="") -> dict[str, Any]:
             assert block_id == "semantic_memory_index"
             return {
                 "root": {

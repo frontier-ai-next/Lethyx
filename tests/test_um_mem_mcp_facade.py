@@ -18,6 +18,7 @@ from um_mem.contracts import (
     MemoryBlockRecord,
     RecordBlockMembership,
 )
+from um_mem.contracts.ledger import append_candidate_semantic_verification_ledger_event
 from um_mem.memory import local_service, mcp_facade, mcp_server
 from um_mem.memory.backends.base import MemoryBusyError, MemoryHit
 from um_mem.memory.backends.contracts import CanonicalHeadConflict, block_record_to_memory_hit
@@ -44,6 +45,7 @@ from um_mem.memory.mcp_facade import (
     um_mem_remember,
 )
 from um_mem.memory.mcp_server import TOOL_NAMES, create_mcp_server
+from um_mem.memory.paths import MANAGER_WORKSPACE_ID
 
 
 def test_mcp_remember_operation_id_can_be_queried(monkeypatch, tmp_path) -> None:
@@ -540,7 +542,146 @@ def test_mcp_server_exposes_only_canonical_recall_scope_fields() -> None:
         assert "selected_block_ids" not in properties
         assert "include_passive" not in properties
         assert "include_global" not in properties
+        assert properties["include_manager"]["default"] is False
         assert schema["additionalProperties"] is False
+
+
+def test_mcp_manager_opt_in_only_delivers_same_user_global_memory(tmp_path: Path) -> None:
+    manager = MemoryClient(
+        tmp_path, workspace_id=MANAGER_WORKSPACE_ID, user_id="alice", backend="mempalace"
+    )
+    root = manager.block_map()[0]["block_id"]
+    private = manager.create_leaf_block(
+        name="Manager private",
+        synopsis="Private store notes",
+        parent_id=root,
+        reason="isolation test",
+    )
+    global_leaf = manager.create_leaf_block(
+        name="Shared preference",
+        synopsis="Alice's global preference",
+        parent_id=root,
+        scope="user_global",
+        reason="isolation test",
+    )
+    manager.remember(
+        "Manager private note: never share this", requested_block_id=private["block_id"]
+    )
+    manager.remember(
+        "Alice global preference: use focused tests", requested_block_id=global_leaf["block_id"]
+    )
+
+    arguments = {
+        "query": "focused tests private",
+        "workspace_id": "alpha",
+        "user_id": "alice",
+        "backend": "mempalace",
+        "repo_root": str(tmp_path),
+        "search_all": True,
+        "include_candidates": True,
+    }
+    without = um_mem_recall(**arguments)
+    assert without["ok"] is True
+    assert without["hits"] == []
+    recalled = um_mem_recall(**arguments, include_manager=True)
+    assert recalled["ok"] is True
+    assert len(recalled["hits"]) == 1
+    assert "Alice global preference" in recalled["hits"][0]["text"]
+    assert recalled["hits"][0]["metadata"]["memory_level"] == "manager"
+    assert recalled["hits"][0]["authority"] == "advisory"
+
+    context = um_mem_build_context(**arguments, include_manager=True)
+    assert context["ok"] is True
+    assert len(context["items"]) == 1
+    assert context["items"][0]["metadata"]["memory_level"] == "manager"
+
+    bob = um_mem_recall(**{**arguments, "user_id": "bob"}, include_manager=True)
+    assert bob["ok"] is True
+    assert bob["hits"] == []
+    scoped = um_mem_recall(**arguments, scope_chain=["workspace:alpha"], include_manager=True)
+    assert scoped["ok"] is True
+    assert scoped["hits"] == []
+
+
+def test_mcp_tool_manager_read_uses_bound_user_identity(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    manager = MemoryClient(
+        tmp_path, workspace_id=MANAGER_WORKSPACE_ID, user_id="alice", backend="mempalace"
+    )
+    root = manager.block_map()[0]["block_id"]
+    leaf = manager.create_leaf_block(
+        name="Global rule",
+        synopsis="Alice's cross-project rule",
+        parent_id=root,
+        scope="user_global",
+        reason="MCP identity test",
+    )
+    saved = manager.remember(
+        "Alice global rule: verify focused tests", requested_block_id=leaf["block_id"]
+    )
+    unpublished = um_mem_recall(
+        query="verify focused tests",
+        workspace_id="alpha",
+        user_id="alice",
+        backend="mempalace",
+        repo_root=str(tmp_path),
+        run_id="mcp:another-session",
+        search_all=True,
+        include_candidates=True,
+        include_manager=True,
+    )
+    assert unpublished["ok"] is True
+    assert unpublished["hits"] == []
+    source = manager.backend.get_block(saved.memory_id, workspace_id=MANAGER_WORKSPACE_ID)
+    report = append_candidate_semantic_verification_ledger_event(
+        repo_root=tmp_path,
+        subject=manager.verification_subject(
+            saved.memory_id, expected_source_revision_id=source.revision_id
+        ),
+        verifier_id="verifier:independent",
+        verifier_model_version="reviewer",
+        proposer_model_version="author",
+        coverage=True,
+        preservation=True,
+        faithfulness=True,
+        instruction_safety=True,
+        reasons=("Compared exact source and candidate.",),
+    )
+    manager.promote(
+        saved.memory_id,
+        reason="publish tested global preference",
+        evidence_refs=[report],
+        expected_source_revision_id=source.revision_id,
+    )
+    monkeypatch.setenv("UM_MEM_REPO_ROOT", str(tmp_path))
+    monkeypatch.setenv("UM_MEM_WORKSPACE", "alpha")
+    monkeypatch.setenv("UM_MEM_BACKEND", "mempalace")
+    monkeypatch.setenv("UM_MEM_USER_ID", "alice")
+    identity = build_local_service_identity(
+        repo_root=tmp_path, workspace_id="alpha", backend="mempalace", caller_role="operator"
+    )
+    try:
+        result = mcp_server._call_tool(
+            "recall",
+            {
+                "query": "verify focused tests",
+                "search_all": True,
+                "include_candidates": True,
+                "include_manager": True,
+            },
+        )
+    finally:
+        mcp_server.close_local_service_clients()
+        shutdown_local_service_listener(identity)
+
+    assert result["ok"] is True
+    assert len(result["hits"]) == 1, {
+        "include_manager": result.get("include_manager"),
+        "scope_chain": result.get("scope_chain"),
+        "diagnostics": result.get("diagnostics"),
+    }
+    assert result["hits"][0]["metadata"]["memory_level"] == "manager"
 
 
 def test_evolution_tools_publish_complete_mapping_schemas_on_both_hosts() -> None:

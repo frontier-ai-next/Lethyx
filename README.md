@@ -50,6 +50,11 @@ python -m pip install -e ".[dev,mcp]"
 See [Install and connect a harness](docs/um-mem/install.md) for the backend
 matrix, harness paths, embedding trade-offs and troubleshooting.
 
+The optional [OpenCode V2 plugin](integrations/opencode/README.md) binds memory
+tools to host sessions and resolves active focus before each primary model round,
+including tool continuations. It is installed separately from the tools-only MCP
+connection; its native-backend smoke does not replace verification in your host.
+
 ### Optional: multilingual semantic tier
 
 The default install stays small, runs on any machine, and never downloads a

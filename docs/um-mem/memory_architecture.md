@@ -6,6 +6,21 @@ authority. One leaf can group multiple independently revised facts. MiniLM
 embedding-window diagnostics leave stored evidence intact. Existing MemPalace
 projection checks and exclusive snapshot/repair boundaries remain in force.
 
+Workspace is the physical isolation boundary, including for `project:` scope:
+`project_id` is trusted lineage within a workspace, not a group of stores.
+Only `user_global` blocks may declare `isolation_policy.cross_workspace: true`.
+The store-level manager identity (`um-mem-manager`) maps its backend, catalog
+and semantic index to `.UM-MEM/memory/`. A workspace client reads that store
+only with explicit `include_manager=True` in the Python recall/context API.
+The cross-workspace view requires a bound matching `user_id`, a user-global
+scope and a manager block whose isolation policy opts in; manager-local
+workspace and project records never cross. These hits follow workspace hits
+within the recall limit and remain advisory, including when the source record
+had stronger authority. Default workspace reads do not query the manager
+store. Existing user-global records in per-workspace stores are not migrated
+or replicated. MCP `recall` and `build_context` expose the same explicit
+`include_manager` read flag, bound to the configured server principal.
+
 Canonical writes use a short interprocess lane and one SQLite transaction for
 the canonical payload, head, source/index links and pending native outbox. A
 failure before commit leaves none of those rows visible. Startup recovery uses
@@ -71,6 +86,30 @@ latency, rendered tokens, consolidation/compaction/eviction/expiry counters, las
 partition health. `expand_block` exposes this operational summary together with retention,
 lifecycle, retrieval mode, token budget, writable reason, promotion requirements, and allowed
 operations. The branch navigation envelope never includes record bodies, titles, or record IDs.
+
+Workspace navigation is paginated. `expand_block(block_id, limit=50, cursor="")`
+returns at most one page of direct children, `child_count`, `next_cursor`, and the
+catalog revision. Cursors bind workspace, profile, parent and revision; a topology
+change invalidates the cursor instead of silently skipping or duplicating children.
+`block_map(child_limit=50)` bounds child previews, and a deep workspace view is
+limited to 201 materialized node descriptions. Child summaries retain the full
+count and branch/writability semantics even when their child-ID preview is empty.
+Follow their cursor with `expand_block` to inspect the omitted children. Protected
+policy-tree cursors additionally bind the compiled policy-catalog revision.
+
+Expansion uses `block_health` for only the selected node and visible child page.
+It reads persisted native-partition identities and observations without probing a
+provider or enumerating unrelated partitions. `diagnostics_status=not_probed` and
+`metrics_scope=native_partition` distinguish these observations from current
+backend readiness; explicit `health`/preflight operations retain that role. A
+custom backend without this operation reports `unsupported`. Partition counters
+describe the physical partition, not causal usefulness or per-user outcome credit.
+Scoped current-record counts use both the profile and stable physical key,
+including published membership overrides after split/merge. Historical physical
+partitions may coexist within a leaf: their observations remain visible, while
+superseded records do not inflate current counts. Event observations span catalog
+revisions of the same physical identity. Identity/key pairs are validated using
+the owning backend's constructor before deduplication or profile admission.
 The internal materialized leaf descriptor keeps exact current-record counts from indexed SQLite
 membership rows and at most 64 record/revision IDs as a diagnostic preview. Its
 `record_ids_truncated` flag marks a larger leaf; exact record lookup and paginated

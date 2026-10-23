@@ -122,6 +122,8 @@ from um_mem.memory.catalog_store import (
     MaintenanceObservationType,
     TopologyBlockState,
     WorkspaceCatalogStore,
+    navigation_cursor,
+    read_navigation_cursor,
 )
 from um_mem.memory.consolidation import (
     CanonicalConsolidationPipeline,
@@ -492,15 +494,9 @@ def _hit_allowed(hit: MemoryHit, plan: RecallPlan) -> bool:
         return False
     if is_protected_memory(record.sensitivity, record.content_mode, record.operational_risk):
         return False
-    if (
-        plan.workspace_id
-        and record.workspace_id
-        and record.workspace_id != plan.workspace_id
-        and record.scope != "user_global"
-    ):
-        # Only a user-global block may be served outside its own workspace;
-        # every other block keeps the workspace boundary even when a shared
-        # index or data directory contains foreign records.
+    if plan.workspace_id and record.workspace_id != plan.workspace_id:
+        # The manager store is queried independently and validates the block's
+        # cross-workspace policy. A shared workspace index grants no shortcut.
         return False
     if plan.profile_id and record.profile_id != plan.profile_id:
         return False
@@ -1455,6 +1451,8 @@ class MemoryClient:
         include_index_state: bool,
         path: tuple[str, ...],
         child_ids: tuple[str, ...] | None = None,
+        child_count: int | None = None,
+        next_cursor: str = "",
         topology_state: TopologyBlockState | None = None,
         related_block_ids: tuple[str, ...] = (),
         native_partitions: tuple[dict[str, Any], ...] = (),
@@ -1553,10 +1551,11 @@ class MemoryClient:
                         str(value) for value in coverage.get("exact_dimensions") or () if str(value)
                     ]
         visible_child_ids = block.child_ids if child_ids is None else child_ids
+        total_children = len(visible_child_ids) if child_count is None else child_count
         writable = (
             block.agent_writable
             and not block.index_only
-            and not visible_child_ids
+            and not total_children
             and descriptor.authority != "directive"
         )
         view = {
@@ -1576,7 +1575,10 @@ class MemoryClient:
             "trust": descriptor.authority,
             "parent_id": block.parent_id,
             "child_ids": list(visible_child_ids),
-            "expandable": bool(visible_child_ids),
+            "child_count": total_children,
+            "children_truncated": total_children > len(visible_child_ids),
+            "next_cursor": next_cursor,
+            "expandable": bool(total_children),
             "links": {
                 "parent_id": block.parent_id,
                 "child_ids": list(visible_child_ids),
@@ -1604,7 +1606,7 @@ class MemoryClient:
             return view
         if writable:
             writable_reason = "agent_writable_leaf"
-        elif visible_child_ids:
+        elif total_children:
             writable_reason = "branch_index_content_free"
         elif block.index_only:
             writable_reason = "index_node_content_free"
@@ -1613,13 +1615,13 @@ class MemoryClient:
         else:
             writable_reason = "catalog_policy_non_agent_writable"
         allowed_operations = ["recall"]
-        if visible_child_ids:
+        if total_children:
             allowed_operations = ["expand"]
         elif writable:
             allowed_operations.append("remember")
-        if not visible_child_ids and descriptor.lifecycle_policy.get("mutable") is True:
+        if not total_children and descriptor.lifecycle_policy.get("mutable") is True:
             allowed_operations.append("lifecycle_transition")
-        if not visible_child_ids and block.promotion_policy:
+        if not total_children and block.promotion_policy:
             allowed_operations.append("promote")
         primary_partition = dict(native_partitions[0]) if native_partitions else {}
         primary_metrics = dict(block_metrics[0]) if block_metrics else {}
@@ -1656,14 +1658,17 @@ class MemoryClient:
         )
         return view
 
-    def block_map(self, *, depth: int = 1, include_meta: bool = False) -> list[dict[str, Any]]:
+    def block_map(
+        self, *, depth: int = 1, include_meta: bool = False, child_limit: int = 50
+    ) -> list[dict[str, Any]]:
         if type(depth) is not int or not 1 <= depth <= 8:
             raise ValueError("block_map depth must be an integer from 1 to 8")
-        states = load_workspace_topology(
-            self.repo_root,
-            self.workspace_id,
-            profile_id=self.profile_id,
-        )
+        store = WorkspaceCatalogStore(self.repo_root, self.workspace_id, self.profile_id)
+        try:
+            navigation = store.navigation(depth=depth, child_limit=child_limit)
+        finally:
+            store.close()
+        states = navigation.states
         states_by_id = {state.block_id: state for state in states}
         if include_meta:
             # The protected catalog is the routing meta-tree. Records written to
@@ -1674,20 +1679,47 @@ class MemoryClient:
                 self.repo_root,
                 self.workspace_id,
                 profile_id=self.profile_id,
-            )
+                include_workspace=False,
+            ) + [state.block for state in states]
         else:
             blocks = [state.block for state in states]
         blocks_by_id = {block.block_id: block for block in blocks}
         child_ids_by_parent = self._catalog_child_ids(blocks)
+        child_ids_by_parent.update(navigation.child_ids)
         catalog = compile_semantic_catalog(blocks)
+        meta_revision = (
+            compile_semantic_catalog(
+                block for block in blocks if block.block_id not in states_by_id
+            ).revision_id
+            if include_meta
+            else ""
+        )
 
         def view(block: MemoryBlock, path: tuple[str, ...]) -> dict[str, Any]:
+            child_ids = child_ids_by_parent[block.block_id]
+            count = navigation.child_counts.get(block.block_id, len(child_ids))
+            cursor = navigation.next_cursors.get(block.block_id, "")
+            if block.block_id not in states_by_id:
+                child_ids = child_ids[:child_limit] if len(path) < depth or depth == 1 else ()
+                cursor = (
+                    navigation_cursor(
+                        self.workspace_id,
+                        self.profile_id,
+                        block.block_id,
+                        meta_revision,
+                        (str(len(child_ids)), ""),
+                    )
+                    if count > len(child_ids)
+                    else ""
+                )
             payload = self._block_catalog_view(
                 block,
                 catalog.descriptor(block.block_id),
                 include_index_state=depth > 1,
                 path=path,
-                child_ids=child_ids_by_parent[block.block_id],
+                child_ids=child_ids,
+                child_count=count,
+                next_cursor=cursor,
                 topology_state=states_by_id.get(block.block_id),
             )
             is_meta = block.block_id not in states_by_id
@@ -1704,7 +1736,7 @@ class MemoryClient:
                     )
             if len(path) < depth:
                 children = []
-                for child_id in child_ids_by_parent[block.block_id]:
+                for child_id in child_ids:
                     child = blocks_by_id.get(child_id)
                     if child is None or child_id in path:
                         continue
@@ -1793,26 +1825,31 @@ class MemoryClient:
             "edges": [edge.to_mapping() for edge in edges],
         }
 
-    def expand_block(self, block_id: str) -> dict[str, Any]:
+    def expand_block(self, block_id: str, *, limit: int = 50, cursor: str = "") -> dict[str, Any]:
         selected_id = str(block_id or "").strip()
         store = WorkspaceCatalogStore(self.repo_root, self.workspace_id, self.profile_id)
         try:
-            states = store.list_blocks()
-            edges_by_block = {state.block_id: store.edges_for(state.block_id) for state in states}
+            navigation = store.navigation(
+                block_id=selected_id, depth=2, include_edges=True, child_limit=limit, cursor=cursor
+            )
         finally:
             store.close()
-        # Expand both the agent-authored workspace tree and the protected
-        # meta-tree. A record can legitimately live in either one.
-        blocks = load_memory_blocks(
-            self.repo_root,
-            self.workspace_id,
-            profile_id=self.profile_id,
-        )
+        states = navigation.states
+        edges_by_block = navigation.edges
+        blocks = [state.block for state in states]
+        if not blocks:
+            # The protected policy tree is a separate, small navigation surface.
+            blocks = load_memory_blocks(
+                self.repo_root,
+                self.workspace_id,
+                profile_id=self.profile_id,
+                include_workspace=False,
+            )
         states_by_id = {state.block_id: state for state in states}
         by_id = {block.block_id: block for block in blocks}
-        child_ids_by_parent = self._catalog_child_ids(blocks)
+        child_ids_by_parent = navigation.child_ids if states else self._catalog_child_ids(blocks)
         visible_root_ids = tuple(block.block_id for block in blocks if not block.parent_id)
-        path_ids = self._catalog_path(
+        path_ids = navigation.path_ids or self._catalog_path(
             selected_id,
             visible_root_ids=visible_root_ids,
             child_ids_by_parent=child_ids_by_parent,
@@ -1820,10 +1857,56 @@ class MemoryClient:
         if not path_ids:
             raise ValueError("block_id must identify a visible catalog block")
         catalog = compile_semantic_catalog(blocks)
+        counts = dict(navigation.child_counts)
+        cursors = dict(navigation.next_cursors)
+        if not states:
+            counts = {key: len(ids) for key, ids in child_ids_by_parent.items()}
+            offset_text, after_id = read_navigation_cursor(
+                cursor,
+                workspace_id=self.workspace_id,
+                profile_id=self.profile_id,
+                block_id=selected_id,
+                revision=catalog.revision_id,
+            )
+            if after_id or (offset_text and not offset_text.isdecimal()):
+                raise ValueError("invalid navigation cursor")
+            offset = int(offset_text or "0")
+            all_children = child_ids_by_parent[selected_id]
+            if offset > len(all_children):
+                raise ValueError("invalid navigation cursor offset")
+            selected_children = all_children[offset : offset + limit]
+            cursors = {
+                key: navigation_cursor(
+                    self.workspace_id, self.profile_id, key, catalog.revision_id, ("0", "")
+                )
+                if count
+                else ""
+                for key, count in counts.items()
+            }
+            end = offset + len(selected_children)
+            cursors[selected_id] = (
+                navigation_cursor(
+                    self.workspace_id,
+                    self.profile_id,
+                    selected_id,
+                    catalog.revision_id,
+                    (str(end), ""),
+                )
+                if end < len(all_children)
+                else ""
+            )
+            child_ids_by_parent = {key: () for key in child_ids_by_parent}
+            child_ids_by_parent[selected_id] = selected_children
         selected = by_id[selected_id]
         children = [by_id[child_id] for child_id in child_ids_by_parent[selected_id]]
-        health = getattr(self.backend, "health", None)
-        health_payload = health() if callable(health) else {}
+        health = getattr(self.backend, "block_health", None)
+        health_payload = (
+            health(
+                (selected_id, *(child.block_id for child in children)), profile_id=self.profile_id
+            )
+            if callable(health)
+            else {"readiness": "unsupported"}
+        )
         partition_rows = [
             dict(row)
             for row in health_payload.get("native_partitions") or ()
@@ -1858,11 +1941,15 @@ class MemoryClient:
                 include_index_state=True,
                 path=path,
                 child_ids=child_ids_by_parent[block.block_id],
+                child_count=counts[block.block_id],
+                next_cursor=cursors[block.block_id],
                 topology_state=states_by_id.get(block.block_id),
                 related_block_ids=related_for(block.block_id),
                 native_partitions=partitions_for(block.block_id),
                 block_metrics=metrics_for(block.block_id),
             )
+            payload["diagnostics_status"] = str(health_payload.get("readiness") or "unknown")
+            payload["metrics_scope"] = str(health_payload.get("metrics_scope") or "unknown")
             is_meta = block.block_id not in states_by_id
             payload["meta"] = is_meta
             payload["node_kind"] = "meta" if is_meta else "workspace"
@@ -1878,6 +1965,9 @@ class MemoryClient:
 
         return {
             "path_ids": list(path_ids),
+            "catalog_revision": navigation.catalog_revision,
+            "child_count": counts[selected_id],
+            "next_cursor": cursors[selected_id],
             "root": expanded_view(selected, path_ids),
             "children": [expanded_view(child, (*path_ids, child.block_id)) for child in children],
         }
@@ -2968,10 +3058,12 @@ class MemoryClient:
         finally:
             store.close()
 
-    def navigation_envelope(self, block_id: str) -> dict[str, Any]:
+    def navigation_envelope(
+        self, block_id: str, *, limit: int = 50, cursor: str = ""
+    ) -> dict[str, Any]:
         """Return content-free navigation, health, and advisory maintenance facts."""
 
-        expanded = self.expand_block(block_id)
+        expanded = self.expand_block(block_id, limit=limit, cursor=cursor)
         block = dict(expanded["root"])
         observations = self.maintenance_observations(block_id)
         proposal_by_observation = {
@@ -2995,8 +3087,10 @@ class MemoryClient:
         return {
             "workspace_id": self.workspace_id,
             "profile_id": self.profile_id,
-            "catalog_revision": self.catalog_revision(),
+            "catalog_revision": expanded["catalog_revision"],
             "tree_path": list(expanded["path_ids"]),
+            "next_cursor": expanded["next_cursor"],
+            "child_count": expanded["child_count"],
             "block": block,
             "children": list(expanded["children"]),
             "related_blocks": self.related_blocks(block_id),
@@ -5431,17 +5525,14 @@ class MemoryClient:
     def _manager_hits(self, plan: RecallPlan) -> list[MemoryHit]:
         """Read supplemental store-level memory for an explicit manager opt-in.
 
-        The manager layer is a separate store above the workspace boundary, so
-        it is queried through its own client instead of widening the workspace
-        scan. Only the parent plan's workspace and user-global scope kinds are
-        carried over; session and project lineage never reach this layer.
+        The manager layer is queried through its own client rather than
+        widening the workspace scan. Only the bound user's global scope is
+        queried; project and session lineage never reach this layer.
         """
 
-        if self.workspace_id == MANAGER_WORKSPACE_ID:
+        if self.workspace_id == MANAGER_WORKSPACE_ID or not self.user_id:
             return []
-        scope_chain = (f"workspace:{MANAGER_WORKSPACE_ID}",) + tuple(
-            scope_key for scope_key in plan.scope_chain if scope_key.startswith("user_global:")
-        )
+        scope_chain = (f"user_global:{self.user_id}",)
         hits = self._manager_client().recall(
             plan.query,
             limit=plan.limit,
@@ -5456,6 +5547,14 @@ class MemoryClient:
             search_all=True,
             retrieval_mode=plan.retrieval_mode,
         )
+        allowed_blocks = {
+            block.block_id
+            for block in load_memory_blocks(
+                self.repo_root, MANAGER_WORKSPACE_ID, profile_id=self.profile_id
+            )
+            if block.scope == "user_global"
+            and block.isolation_policy.get("cross_workspace") is True
+        }
         return [
             MemoryHit(
                 text=hit.text,
@@ -5463,9 +5562,18 @@ class MemoryClient:
                 score=hit.score,
                 kind=hit.kind,
                 tags=list(hit.tags),
-                metadata={**dict(hit.metadata or {}), "memory_level": "manager"},
+                metadata={
+                    **dict(hit.metadata or {}),
+                    "authority": "advisory",
+                    "memory_level": "manager",
+                },
             )
             for hit in hits
+            if hit.metadata.get("workspace_id") == MANAGER_WORKSPACE_ID
+            and hit.metadata.get("scope") == "user_global"
+            and hit.metadata.get("user_id") == self.user_id
+            and isinstance(hit.metadata.get("block_membership"), dict)
+            and hit.metadata["block_membership"].get("primary_block_id") in allowed_blocks
         ]
 
     def _recall_backend_hits(
@@ -5588,7 +5696,7 @@ class MemoryClient:
             deduplicated.append(hit)
             if len(deduplicated) >= plan.limit:
                 break
-        if not include_manager:
+        if not include_manager or len(deduplicated) >= plan.limit:
             return deduplicated
         merged = list(deduplicated)
         for manager_hit in self._manager_hits(plan):
@@ -5600,6 +5708,8 @@ class MemoryClient:
                 continue
             seen_ids.add(identity)
             merged.append(manager_hit)
+            if len(merged) >= plan.limit:
+                break
         return merged
 
     def _record_context_decision(
@@ -5954,6 +6064,7 @@ class MemoryClient:
         record_ids: list[str] | tuple[str, ...] | None = None,
         source_speakers: list[str] | tuple[str, ...] | None = None,
         include_manager: bool = False,
+        _allow_default_manager_scope: bool = False,
         recall_plan: RecallPlan | dict[str, Any] | None = None,
     ) -> list[MemoryHit]:
         """Recall memory as non-directive evidence for a host agent.
@@ -6012,6 +6123,11 @@ class MemoryClient:
             raise ValueError("source_speakers must be 1-8 nonempty names")
         if effective_plan.limit <= 0 or effective_plan.max_tokens <= 0:
             return []
+        include_manager = include_manager and (
+            (scope_chain is None and recall_plan is None)
+            or _allow_default_manager_scope
+            or f"user_global:{self.user_id}" in effective_plan.scope_chain
+        )
         if source_speakers is None:
             return self._recall_backend_hits(effective_plan, include_manager=include_manager)
         selected = {speaker.strip().casefold() for speaker in source_speakers}
@@ -7737,6 +7853,7 @@ class MemoryClient:
             recall_plan=plan,
             source_speakers=source_speakers,
             include_manager=include_manager,
+            _allow_default_manager_scope=scope_chain is None and recall_plan is None,
         )
         selection_context = SelectionContext(
             query=plan.query,
@@ -7748,17 +7865,10 @@ class MemoryClient:
             as_of="" if plan.known_as_of else plan.as_of,
         )
         manager_selection: SelectionContext | None = None
-        if include_manager and self.workspace_id != MANAGER_WORKSPACE_ID:
+        if include_manager and self.workspace_id != MANAGER_WORKSPACE_ID and self.user_id:
             manager_selection = replace(
                 selection_context,
-                scope_chain=(
-                    (f"workspace:{MANAGER_WORKSPACE_ID}",)
-                    + tuple(
-                        scope_key
-                        for scope_key in plan.scope_chain
-                        if scope_key.startswith("user_global:")
-                    )
-                ),
+                scope_chain=(f"user_global:{self.user_id}",),
             )
         projected: list[dict[str, Any]] = []
         for hit in hits:

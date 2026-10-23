@@ -875,6 +875,7 @@ def load_memory_blocks(
     *,
     profile_id: str = "default",
     strict: bool = False,
+    include_workspace: bool = True,
 ) -> list[MemoryBlock]:
     bound = _BOUND_CATALOG.get()
     resolved_root = Path(repo_root).resolve()
@@ -916,7 +917,7 @@ def load_memory_blocks(
                     ):
                         continue
                 by_id[block.block_id] = block
-    if workspace_id:
+    if workspace_id and include_workspace:
         dynamic_states = load_workspace_topology(
             repo_root,
             workspace_id,
