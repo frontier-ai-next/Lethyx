@@ -2,11 +2,37 @@
 
 UM-MEM has one memory model and several ways to reach it. Use the interface that matches the host lifecycle you control.
 
+## Portable adapter contract
+
+A harness can use callbacks, native provider methods, command hooks, or another
+local transport. The names of its events are adapter details. For autonomous
+memory, the adapter needs to establish these capabilities in a live run:
+
+1. Bind workspace, project, session, and the selected backend so writes and
+   automatic reads stay in the intended scope.
+2. Offer a bounded relevant read before work when the host has that lifecycle
+   point. If it cannot, expose an explicit read tool and report the limitation.
+3. Give the working agent a review opportunity during work or at a reliable
+   boundary. The agent can add, amend, or choose no write without a user command.
+4. Supply trusted source bytes or outcomes when available. Verification reports
+   what was checked; it does not convert a summary into source truth.
+5. Report whether each capability actually ran. Installed configuration, an
+   available MCP tool, and a successful service health check are different
+   observations.
+
+Storage budgets and maintenance are separate from capture: the adapter should
+not create a visible record for every lifecycle event. The selected backend
+retains canonical history, while the agent reviews duplicates and stale facts
+through current records. Different hosts may provide more or fewer capabilities
+without changing the memory schema.
+
 ## Installing host integrations
 
 Claude Code and Codex use two complementary user-level connections: MCP exposes
-UM-MEM tools, while native hooks submit content-free lifecycle signals to the
-local host-state scheduler. Hook events do not create semantic memory records.
+UM-MEM tools, while native hooks report lifecycle signals. A signal alone does
+not create a semantic record. The connected working agent must review useful
+knowledge and make a scoped write, correction, or no-write decision. Codex and
+Claude Code now request this review once at `Stop` when their hooks run.
 Install the optional MCP dependency in the same Python environment used by the
 `um-mem` command, then install the host config:
 
@@ -32,8 +58,10 @@ reinstall existing Codex hooks after upgrading so their commands can execute.
 
 The status command checks saved configuration only. It does not launch either
 host or prove a live tool call. MCP is tools-only: these two integrations do not
-deliver an exact active-memory mask before every model round. Hooks are
-best-effort, advisory lifecycle observations and cannot block the host task.
+deliver an exact active-memory mask before every model round. Their `Stop`
+hooks can continue the same agent once for memory review. The review does not
+change the success status of the user's task, and it may produce no memory
+mutation.
 On `UserPromptSubmit`, the Codex hook first resolves the active mask for that
 exact session. If it has no usable context, the hook retrieves bounded memory
 from the current project by prompt and passes it as supplemental context. The
@@ -62,6 +90,17 @@ call or a claim that the source itself is true. Tools-only MCP has no trusted
 source-registration surface, so its ordinary writes still remain candidates.
 Claude/Codex `Stop` events mean a completed response/turn; only `SessionEnd`
 means the session ended.
+
+Automatic review and automatic verification are separate. The Codex and Claude
+Code reviews can produce ordinary advisory candidates through MCP. Those paths
+do not yet bind the user prompt as a trusted exact source, so they must not
+report the candidate as source-verified. A host integrating `register_source()` can verify
+an exact extract without a second model. Full live host conformance, including
+the no-write outcome and bounded growth over repeated turns, still needs an
+end-to-end run before claiming plug-and-play autonomous memory.
+The one-pass `Stop` continuation invokes the same model again, adding
+latency and tokens. Whether later recall offsets that cost is an evaluation
+question, not a property proved by the hook tests.
 
 ## MCP
 

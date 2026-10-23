@@ -26,6 +26,7 @@ from um_mem.memory.local_service import (
     build_local_service_identity,
     local_service_scope_lineage,
 )
+from um_mem.memory.recall_plan import MEMORY_REVIEW_GUIDANCE
 
 CODEX_HOOK_SCHEMA_VERSION = 1
 MAX_CODEX_HOOK_INPUT_BYTES = 1_048_576
@@ -400,9 +401,12 @@ def hook_control_response(
     *,
     context: str = "",
     error: str = "",
+    review_needed: bool = False,
 ) -> dict[str, object]:
-    """Return only fields accepted by Codex for a non-blocking lifecycle hook."""
+    """Return Codex hook control fields with at most one review continuation."""
 
+    if event_name == "Stop" and review_needed and not error:
+        return {"decision": "block", "reason": MEMORY_REVIEW_GUIDANCE}
     response: dict[str, object] = {"continue": True} if event_name in _COMMON_CONTROL_EVENTS else {}
     if context and event_name == "UserPromptSubmit":
         response["hookSpecificOutput"] = {
@@ -427,6 +431,7 @@ def main(argv: list[str] | None = None) -> int:
     event_name = payload.get("hook_event_name")
     context = ""
     error = str(payload.get("error") or "") if payload.get("ok") is False else ""
+    review_needed = False
     if payload.get("ok") is not False:
         pool = LocalServiceClientPool()
         try:
@@ -440,6 +445,8 @@ def main(argv: list[str] | None = None) -> int:
             )
             if captured.get("ok") is not True:
                 error = str(captured.get("error") or "local service host capture failed")
+            elif event_name == "Stop" and payload.get("stop_hook_active") is False:
+                review_needed = True
             if event_name == "UserPromptSubmit":
                 recalled = read_codex_prompt_context(
                     payload,
@@ -461,6 +468,7 @@ def main(argv: list[str] | None = None) -> int:
                 event_name if isinstance(event_name, str) else "",
                 context=context,
                 error=error,
+                review_needed=review_needed,
             )
         ),
         flush=True,

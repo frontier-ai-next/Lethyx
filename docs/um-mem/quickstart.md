@@ -16,13 +16,17 @@ um-memory map
 `setup` writes `~/.um-mem/config.json` and connects the harness you choose.
 After that, `um-memory map` needs no `--repo-root`, `--workspace` or `--backend`.
 See [Install and connect a harness](install.md) for the guided choices.
+The map can be empty in a fresh store. A connected harness needs a working
+review lifecycle before normal work can add memory automatically; configuration
+alone does not create records.
 
 ## One harness, several projects
 
-A workspace is the isolation unit: every workspace has its own records, block
-tree and indexes, and recall is bound to the identity the harness starts the
-MCP server with. One harness setting can therefore hold only one identity, and
-every project needs its own entry with its own workspace.
+A workspace is the physical isolation unit: every workspace has its own records,
+block tree, and indexes. In the current MCP installer, a server process starts
+with one bound workspace identity. A host may use project IDs inside that
+workspace or configure separate workspace entries for stronger isolation; this
+is an adapter choice, not a required memory tree shape.
 
 For OpenCode the entry can live next to the code instead of in the user-level
 settings:
@@ -57,8 +61,9 @@ off by default and delivered as supplemental, advisory evidence. Only records
 in manager blocks whose isolation policy permits cross-workspace delivery are
 included; a `user_global` record written in an ordinary workspace is not
 silently copied into the manager store. Bind a stable user identity explicitly.
-Candidate records still obey the run boundary: publish them through evidence
-and verification gates before relying on them in another session.
+An ordinary candidate remains durable and can be recalled as advisory evidence
+in another session. Evidence and verification gates are required before it can
+be promoted to directive authority; cross-session recall does not promote it.
 MCP `recall` and `build_context` also accept `include_manager=True` when the
 server is bound to `UM_MEM_USER_ID`; the MCP server does not accept a caller-
 supplied user identity. An MCP connection to the reserved manager identity

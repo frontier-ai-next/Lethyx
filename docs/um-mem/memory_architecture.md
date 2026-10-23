@@ -1,5 +1,34 @@
 # Memory architecture
 
+## Product behavior before implementation detail
+
+Installing memory should change the agent's ordinary workflow. On a new task,
+the connected harness makes a bounded, project-scoped read available. While
+working, the same agent notices lasting preferences, decisions, facts, fixes,
+and lessons. It inspects the relevant existing record, then adds or revises
+useful knowledge through the selected backend. At a real work boundary it
+reviews once more and can explicitly choose no write. The user should not have
+to request these operations.
+
+The memory must become more useful without turning every prompt or tool event
+into a record. Repeated facts should retain one current canonical head with
+auditable revisions. Source-backed quotations may be checked for exact byte
+fidelity without a second model. Summaries and inferences remain labeled as
+agent-authored until evidence supports them. Retrieval and automatic context
+are bounded by scope and token budget. Maintenance should identify overloaded
+leaves and redundant records for the agent to resolve, not leave them to grow
+unnoticed.
+
+**Implemented versus missing:** Codex and Claude Code can now request one
+same-agent review at `Stop` when their native hooks run. Codex's prompt hook
+reads bounded scoped context. Hermes supplies native pre-round context and
+agent guidance. A tools-only MCP
+connection cannot guarantee that the host asks for review, captures exact
+sources, or delivers context before each round. Other harnesses need a real
+adapter for those lifecycle points; listing MCP tools is insufficient proof.
+
+## Storage and authority boundaries
+
 Hybrid retrieval changes candidate discovery inside explicitly selected leaves;
 it does not author topology, choose active focus, rewrite records or grant
 authority. One leaf can group multiple independently revised facts. MiniLM
@@ -265,12 +294,13 @@ everything else stays navigable and recallable.
 
 ## Host observations and failure semantics
 
-A host observation is evidence, not a semantic memory write. `file_created`, `source_opened`,
-`test_passed`, `decision`, and every other host event retain one hidden raw witness and return its
-evidence reference. They never select a semantic block, create a model-visible record, mutate the
-tree, or alter the active mask. If the fact is worth retaining semantically, the model chooses an
-existing visible leaf or creates one and performs a separate explicit write linked to the witness.
-There is no event-kind-to-block table and no second hidden semantic tree.
+A host observation is evidence or a content-free scheduling signal, not a
+semantic memory write. When a host has exact source bytes or an outcome, it may
+register a hidden witness. A lifecycle event can trigger the same working
+agent's review; that agent chooses whether a semantic write is warranted and
+where it belongs. This review is automatic from the user's perspective and may
+legitimately produce no record. There is no event-kind-to-block table and no
+second hidden semantic tree.
 
 Memory is advisory to the host. Listener failures, missing observations, empty recall, unavailable
 active-mask materialization, and analysis warnings are recorded explicitly, but they do not change
@@ -341,14 +371,16 @@ and records a digest-bound receipt.
 Memory remains advisory. Only typed host evidence and verified outcomes may change policy or
 authority.
 
-## Agent-authored memory review at work boundaries
+## Automatic agent-authored memory review at work boundaries
 
-A host with a real turn-completion boundary may ask the same working agent for one final memory
-review before ending the managed session. The review is not transcript retention and does not let
-the host infer semantic placement. The agent first performs any useful recall, record correction,
-candidate write, or active selection through its ordinary scoped tools, then emits a
-`MemoryReviewDecision`. The host binds that decision to the exact content-free tool observations in
-a `MemoryReviewReceipt`.
+A host with a real turn-completion boundary should ask the same working agent for one final memory
+review before ending the managed session. This is part of normal use, not a user-requested task.
+The review is not transcript retention and does not let the host infer semantic placement. The
+agent first performs any useful recall, record correction, candidate write, or active selection
+through its ordinary scoped tools. An optional stronger host contract can emit a
+`MemoryReviewDecision` bound to exact content-free tool observations in a
+`MemoryReviewReceipt`. Codex and Claude Code currently have the one-pass review
+prompt, but not this durable receipt binding.
 
 The closed outcomes are `changed`, `unchanged`, `unavailable`, and `forbidden`. A `changed` decision
 must name the exact pending candidate or selected block IDs observed by the host. An `unchanged`
@@ -367,24 +399,30 @@ it keeps working continuity disabled and may still use the boundary review above
 the useful SKILL.state principle—explicit validated state where the host can prove it—without
 turning UM-MEM into a hidden agent loop or requiring a fixed schema for every domain.
 
-## Non-negotiable anti-drift boundary
+## Portable guarantees and replaceable policies
 
-The model owns semantic topology: block meaning, placement, cross-links, active focus, and proposed
-consolidation. Those decisions must arrive as explicit typed mutations with actor, reason, scope,
-and expected revision where applicable.
+Every autonomous adapter needs a way to identify the working scope, supply or
+expose bounded memory, and let the working agent make a memory decision during
+work or at a reliable boundary. The
+current implementation uses typed tools and model-selected leaves. A different
+host may expose those actions through its own provider, callback, or tool API;
+the product contract does not require Codex hooks, a particular prompt, or a
+fixed branch taxonomy.
 
-Deterministic code may enforce identity, workspace/profile isolation, exact scope, schema shape,
-compare-and-swap revisions, lifecycle legality, tree acyclicity, edge integrity, record coverage,
-budgets, cryptographic binding, and typed verifier receipts. It may report numeric health facts and
-retain authenticated raw witnesses.
+The durable writer enforces identity, isolation, scope, revision checks,
+lifecycle legality, graph integrity, and source binding. A host may use local
+indexes or heuristics to *suggest* retrieval or maintenance, but a suggestion
+must not silently become a verified fact, directive, or destructive mutation.
+Model-authored summaries are not machine-verified merely because the model
+phrased them confidently. Exact source matching verifies fidelity to source
+bytes, not the source's truth. If a host can provide stronger evidence or a
+different bounded review mechanism, it may use that while preserving these
+distinctions.
 
-Deterministic code must not infer semantic placement, relevance, lifecycle, topology, active focus,
-negative experience, or consolidation from prompt prose, tool-result prose, filenames, branch
-names, keywords, regular expressions, substring matches, or similar heuristics. It must not create a
-mandatory project/code/log/reflection taxonomy, silently mutate the tree from a metric threshold, or
-turn a model-authored claim into machine verification. Failure to materialize active memory is an
-explicit degraded diagnostic; it is never reported as a successful recall and never blocks the host
-task.
+Limits such as child page size, graph traversal bounds, token budgets, and
+record length targets are operational settings to measure and tune, not
+universal definitions of useful memory. If context delivery fails, the adapter
+reports the degraded state and lets the host task proceed.
 
 Composite topology operations such as split and merge must be recoverable as one logical mutation:
 either catalog changes, record reassignment, provenance links, and receipts all commit, or the

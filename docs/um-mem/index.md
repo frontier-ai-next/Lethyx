@@ -1,23 +1,29 @@
-# Long-term memory without a growing prompt
+# Long-term memory that works during the task
 
-An agent can work for a long time only if it can preserve useful state without
-replaying its entire history. UM-MEM does that with an evolving block tree, a
-small navigation layer, and a bounded active slice.
+The intended user experience is: connect UM-MEM to a supported harness, then
+work normally. The agent retrieves relevant past knowledge, notices reusable
+facts and decisions without a "remember" command, updates stale records, and
+is allowed to decide that nothing should be saved. One selected local backend
+stores the durable memory. A hook event by itself is not a memory fact.
 
-The important idea is separation:
+This loop has two different participants. The working agent decides what a
+piece of work means, where it belongs, and whether it replaces an existing
+record. UM-MEM checks scope, source fidelity where a trusted source is
+available, revision safety, and delivery budget. The user does not manage these
+decisions in normal use. A host without a model-visible memory instruction and
+a working review boundary has tools, but it does not yet have automatic memory.
+
+The context sent back to the agent stays small:
 
 ```text
-all durable knowledge             what the model sees every round
------------------------------     -------------------------------
-passive tree + graph + records -> active mask -> activation lease
-                |
-                +----------------> explicit temporary recall
+durable records + navigation -> scoped retrieval -> bounded context
+                  |                              (when the adapter delivers it)
+                  +-----------> explicit temporary recall
 ```
 
 The transcript may be compacted or a new session may begin. The passive memory
-does not disappear. The next model call receives only the content-free root map
-and, when a native host adapter is present, the active slice selected for that
-exact session and task.
+does not disappear. The host delivers a bounded, scoped slice when its adapter
+supports that lifecycle. MCP tools alone do not inject it automatically.
 
 ## What UM-MEM is
 
@@ -79,10 +85,12 @@ both can still navigate the same passive tree.
 
 ## Choose an integration
 
-- Use [MCP](interfaces.md#mcp) when you want portable tools and are willing to
-  let the agent call them explicitly.
+- Use [MCP](interfaces.md#mcp) for portable tools. MCP alone does not establish
+  autonomous capture or prompt-time delivery.
 - Use [Claude Code and Codex installers](interfaces.md#installing-host-integrations)
-  for user-level MCP tools plus advisory native lifecycle hooks.
+  for user-level MCP tools plus native hooks. Both have a one-pass same-agent
+  review at `Stop`; Codex also has a bounded prompt read. Verify hooks actually
+  run in the host before expecting records in the atlas.
 - Use the [Hermes memory provider](hermes_runtime_integration_user_guide.md)
   when the host's native provider lifecycle should supply pre-round context.
 - Use the [Python API](interfaces.md#python-api) inside another host or control

@@ -1,7 +1,10 @@
 import hashlib
+import io
 import json
 import os
 from pathlib import Path
+
+import pytest
 
 from um_mem.contracts.memory import normalize_identity_path
 from um_mem.integrations.codex_hooks import (
@@ -471,6 +474,69 @@ def test_hook_input_is_bounded_and_control_output_never_exposes_memory_result() 
     assert hook_control_response("Stop") == {"continue": True}
     assert hook_control_response("SessionEnd") == {"continue": True}
     assert hook_control_response("PostToolUse") == {}
+
+
+def test_stop_requests_one_same_agent_memory_review_without_looping(tmp_path: Path) -> None:
+    pool = CapturingClientPool()
+    first = _payload(
+        tmp_path,
+        hook_event_name="Stop",
+        stop_hook_active=False,
+        last_assistant_message="Completed the requested change.",
+    )
+    second = {**first, "stop_hook_active": True}
+
+    first_result = dispatch_codex_hook(first, working_directory=tmp_path, pool=pool)
+    second_result = dispatch_codex_hook(second, working_directory=tmp_path, pool=pool)
+
+    assert first_result["ok"] is True
+    assert second_result["ok"] is True
+    response = hook_control_response("Stop", review_needed=True)
+    assert response["decision"] == "block"
+    assert "UM-MEM" in response["reason"]
+    assert "nothing" in response["reason"]
+    assert hook_control_response("Stop", review_needed=False) == {"continue": True}
+    assert len(pool.host_state_calls) == 2
+
+
+def test_stop_does_not_continue_when_host_state_capture_failed(tmp_path: Path) -> None:
+    result = dispatch_codex_hook(
+        _payload(tmp_path, hook_event_name="Stop", stop_hook_active=False),
+        working_directory=tmp_path,
+        pool=FailingClientPool(),
+    )
+
+    assert result["ok"] is False
+    assert hook_control_response("Stop", review_needed=False) == {"continue": True}
+
+
+def test_stop_command_continues_the_same_agent_once(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    from um_mem.integrations import codex_hooks
+
+    class CommandPool(CapturingClientPool):
+        def close(self) -> None:
+            return None
+
+    pool = CommandPool()
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(codex_hooks, "LocalServiceClientPool", lambda: pool)
+    for active, expected_decision in ((False, "block"), (True, None)):
+        payload = _payload(
+            tmp_path,
+            hook_event_name="Stop",
+            stop_hook_active=active,
+            last_assistant_message="Task complete.",
+        )
+        monkeypatch.setattr(
+            codex_hooks.sys,
+            "stdin",
+            io.TextIOWrapper(io.BytesIO(json.dumps(payload).encode("utf-8"))),
+        )
+        assert codex_hooks.main(["--repo-root", str(tmp_path), "--backend", "mempalace"]) == 0
+        response = json.loads(capsys.readouterr().out)
+        assert response.get("decision") == expected_decision
 
 
 def test_prompt_hook_delivers_only_bounded_advisory_memory(tmp_path: Path) -> None:

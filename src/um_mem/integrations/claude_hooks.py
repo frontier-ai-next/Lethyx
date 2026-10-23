@@ -20,6 +20,7 @@ from um_mem.integrations.host_hook_capture import (
     capture_host_hook,
     git_root,
 )
+from um_mem.memory.recall_plan import MEMORY_REVIEW_GUIDANCE
 
 CLAUDE_HOOK_SCHEMA_VERSION = 1
 MAX_CLAUDE_HOOK_INPUT_BYTES = 1_048_576
@@ -263,7 +264,7 @@ def claude_host_capability_manifest() -> HostCapabilityManifest:
 
 
 def main(argv: list[str] | None = None) -> int:
-    """Run as a non-blocking Claude command hook with intentionally empty stdout."""
+    """Run a Claude lifecycle hook with one bounded same-agent review at Stop."""
 
     parser = argparse.ArgumentParser(add_help=False)
     parser.add_argument("--repo-root", default="")
@@ -273,13 +274,29 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
     payload = parse_hook_input(sys.stdin.buffer.read(MAX_CLAUDE_HOOK_INPUT_BYTES + 1))
     if payload.get("ok") is not False:
-        dispatch_claude_hook(
+        result = dispatch_claude_hook(
             payload,
             repo_root=args.repo_root or None,
             workspace_id=args.workspace or None,
             profile_id=args.profile or None,
             backend=args.backend or None,
         )
+        if (
+            result.get("ok") is True
+            and payload.get("hook_event_name") == "Stop"
+            and payload.get("stop_hook_active") is False
+        ):
+            print(
+                json.dumps(
+                    {
+                        "hookSpecificOutput": {
+                            "hookEventName": "Stop",
+                            "additionalContext": MEMORY_REVIEW_GUIDANCE,
+                        }
+                    }
+                ),
+                flush=True,
+            )
     return 0
 
 

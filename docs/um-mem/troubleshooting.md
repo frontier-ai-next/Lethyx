@@ -5,10 +5,14 @@ store or loosen identity checks until the failing layer is known.
 
 ## MCP tools work, but active context is not automatic
 
-This is expected. MCP exposes `set_active_mask` and `resolve_active_mask`, but
-Claude Code and Codex do not have a UM-MEM pre-round adapter through this
-installer. Their hooks are advisory lifecycle observations. Hermes' native
-provider has a pre-round `prefetch` lifecycle.
+MCP alone exposes `set_active_mask` and `resolve_active_mask`; it does not
+deliver context or make memory decisions on behalf of the host. Codex's
+`UserPromptSubmit` hook can supply bounded project context at the prompt
+boundary, and its `Stop` hook can ask the same agent for one memory review.
+Neither hook runs before every internal model request. Claude Code has a
+one-pass same-agent review at `Stop`, but no prompt-time context injection here. Hermes'
+native provider has a pre-round `prefetch` lifecycle. Verify the host actually
+runs installed hooks; a settings file or MCP health response is not proof.
 
 ## Hermes provider is staged but inactive
 

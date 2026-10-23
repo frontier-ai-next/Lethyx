@@ -28,17 +28,13 @@ def test_memory_read_guidance_reaches_python_mcp_and_hermes() -> None:
     guidance = MemoryClient.agent_instructions()
     assert create_mcp_server().instructions == guidance
     assert guidance in UmMemMemoryProvider().system_prompt_block()
-    assert "empty active mask does not mean" in guidance
-    assert "refine the query" in guidance
-    assert "explicit broad search" in guidance
-    assert "When remember reports similar_records" in guidance
-    assert (
-        "for that block's exact scope and logical_block_id until next_cursor is empty" in guidance
-    )
-    assert (
-        "Do not retract by age, lexical similarity, retrieval rank or a warning alone" in guidance
-    )
-    assert "amendment preserves prior references and history" in guidance
+    assert len(guidance.split()) <= 300
+    assert "without a user command" in guidance
+    assert "save nothing" in guidance
+    assert "source" in guidance
+    assert "scope" in guidance
+    assert "existing record" in guidance
+    assert "candidate" in guidance
 
 
 def test_recall_plan_uses_only_canonical_selection_fields() -> None:

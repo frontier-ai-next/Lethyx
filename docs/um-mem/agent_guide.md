@@ -1,7 +1,16 @@
 # Guide for agents and contributors
 
-Read this page before changing memory behavior. The goal is to preserve the
-central design while keeping the implementation small and reviewable.
+This is a contributor guide for the current implementation, not a universal
+schema for every agent or backend. The product requirement is autonomous,
+bounded memory: after connection, the working agent can recall, save, correct,
+or deliberately save nothing without a user command. A supported adapter must
+actually deliver the relevant context and review opportunity. Its installation
+status alone does not prove that loop works.
+
+Keep portable guarantees separate from local choices. Scope isolation,
+provenance, revision safety, and a bounded prompt matter across hosts. Particular
+hook names, graph limits, embedding windows, token targets, and branch examples
+describe this implementation and may change as adapters or backends evolve.
 
 ## Start with the actual contract
 
@@ -23,13 +32,14 @@ operation.
 
 ### Facts within blocks
 
-A meaningful leaf can contain several independently maintained records. Write one
-independently changeable fact, or a small connected group, per record. Preserve
-participants, events, event dates distinct from reporting dates, exact numbers,
-units, constraints and source references. With MiniLM, aim for 80–200 tokenizer
-tokens. Write receipts diagnose its 256-token embedding window; they do not
-truncate stored content. The agent splits an oversized record by meaning and
-chooses its placement. Record length does not require a new leaf.
+A meaningful leaf can contain several independently maintained records. Choose
+record boundaries by what should be corrected independently; keep connected
+facts together when that helps retrieval. Preserve participants, event dates,
+exact numbers, units, constraints and source references when relevant. Embedding
+models have different windows, so no fixed token target is a memory invariant.
+Projection diagnostics may show how much text a particular index consumed;
+they must not truncate canonical evidence. Record length alone does not require
+a new leaf.
 
 Correct facts through existing CAS revisions. Equal text does not establish
 entity identity. Keep source witnesses recoverable; existing stores are not
@@ -144,20 +154,21 @@ Active memory is not “recent recall” and not a second cache. It is a durable
 exact-scope pointer set over passive memory. A native host resolves it before
 each round into a bounded lease. Recall remains temporary.
 
-Never silently add recalled records to a mask. Never infer a mask from the
-current prompt. Never reuse a session/task mask in a different exact scope.
+The working agent may choose a new focus as the task changes. Keep that choice
+bounded and explicit in the active mask. Do not reuse a session/task mask in a
+different exact scope or silently promote retrieved text into instructions.
 
 ### Observations do not mutate meaning
 
 Tool events, tests, files, session boundaries, and other host observations are
-typed witnesses. They may support later model-authored records or verifier
-receipts. They do not choose a leaf, create a visible record, restructure the
-tree, or change active focus.
+typed witnesses. They can automatically trigger a review by the working agent,
+which may write or correct a semantic record without being told "remember" by
+the user. A raw lifecycle signal alone should not create a visible record.
 
-Do not infer semantic placement, success, failure, relevance, or lifecycle from
-keywords, regular expressions, filenames, command strings, prompts, or
-tool-output prose. Parsing a declared wire format is different from inferring
-meaning from free text; keep that boundary visible in code and tests.
+Adapters may use local hints to prioritize review or retrieval, but a keyword,
+filename, command, or model summary is not independent proof of a claim. Keep
+suggestions separate from verified outcomes, and expose the scope and source of
+any automatic write in code and tests.
 
 ### Memory is advisory
 

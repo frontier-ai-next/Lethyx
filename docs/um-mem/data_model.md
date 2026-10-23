@@ -1,5 +1,10 @@
 # Data and isolation
 
+This page describes the current storage schema and API behavior. Numeric limits
+and named fields here are implementation details, not a taxonomy that every
+harness or future backend must adopt. The portable behavior is summarized in
+[memory methodology](memory_methodology.md).
+
 ## Retrieval mode
 
 `RecallPlan.retrieval_mode` is a closed `semantic | hybrid` value; `semantic`

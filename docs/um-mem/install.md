@@ -80,10 +80,10 @@ chosen backend is actually usable before you rely on it.
 
 | Harness | What setup writes | Notes |
 | --- | --- | --- |
-| OpenCode | `~/.config/opencode/opencode.json` (`mcp.servers.um_mem`) | Uses the same config file as the desktop app; a `.bak` is kept. |
-| Claude Code | `~/.claude.json` and Claude hooks | MCP tools plus hooks. |
-| Codex | `~/.codex/config.toml` and Codex hooks | MCP tools plus hooks. |
-| Hermes | `~/.hermes/config.yaml` | MCP server entry. |
+| OpenCode | `~/.config/opencode/opencode.json` (`mcp.servers.um_mem`) | Portable tools; automatic review needs the separate native adapter. A `.bak` is kept. |
+| Claude Code | `~/.claude.json` for MCP and `~/.claude/settings.json` for hooks | Tools and a one-pass same-agent review at `Stop` when hooks run. |
+| Codex | `~/.codex/config.toml` and Codex hooks | Tools, scoped prompt read, and a one-pass same-agent review at `Stop` when hooks run. |
+| Hermes | `~/.hermes/config.yaml` | MCP tools; use the native provider for pre-round context and agent memory guidance. |
 
 Connect or reconnect later:
 
@@ -91,6 +91,13 @@ Connect or reconnect later:
 um-memory connect opencode
 um-memory connect claude codex
 ```
+
+Connecting a tool is not the same as proving that memory grows. In a new clean
+store, test one ordinary task that produces a reusable fact, decision, or
+preference. Check that the agent saves or updates a record without a "remember"
+command, and check a second task can retrieve it. Then test a trivial turn where
+nothing should be saved. Use `um-memory status` for configuration and the atlas
+for canonical records; neither alone proves the host review callback ran.
 
 The generated environment includes `UM_MEM_REPO_ROOT`, `UM_MEM_WORKSPACE`,
 `UM_MEM_PROFILE`, `UM_MEM_BACKEND` and, when enabled, the semantic model and

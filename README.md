@@ -1,9 +1,25 @@
 # UM-MEM
 
-UM-MEM is a framework-neutral local memory layer for agent systems. It can be
-used as an embedded Python package, connected through MCP, or installed through
-a host adapter. The host remains responsible for routing, permissions, proof
-validity, and task completion; memory supplies scoped advisory context.
+UM-MEM is a local memory layer that should work while an agent works. After a
+supported harness is connected, the user should not need to say "remember this"
+or organize records by hand. The working agent reads a small relevant slice,
+notices durable knowledge during the task, and at a work boundary decides to
+add, correct, propose consolidation, or save nothing. The same agent makes that decision;
+UM-MEM does not require a second model. It should update existing facts instead
+of accumulating a new record for each hook event.
+
+The host remains responsible for routing, permissions, proof validity, and task
+completion. Memory supplies scoped advisory context. A source-exact check can
+confirm that stored text matches host-owned evidence; it does not prove that
+the source is true. Unverified agent summaries remain candidates.
+
+**Current integration status:** Codex has prompt-time scoped recall and a
+one-pass same-agent review at `Stop` when its installed hooks run. Claude Code
+has the same one-pass review hook. Hermes has a native pre-round provider and
+agent memory guidance. MCP alone exposes tools but cannot force an agent to
+write or capture host lifecycle events. The default OpenCode MCP connection does
+not yet guarantee the automatic review loop. Installed settings do not prove
+that a host actually ran its review hook.
 
 ## Release 0.6.0
 
@@ -89,11 +105,12 @@ the boundaries of the context view.
 
 ## Embedded Python
 
-`MemoryClient.agent_instructions()` returns the memory-read guidance for your host's
-agent instruction channel. The MCP initialization handshake and Hermes provider expose
-the same guidance. It explains navigation, scoped recall, query refinement, explicit
-broad search and exact-scope active memory. Your model makes the semantic choices;
-UM-MEM does not choose a branch from the prompt or block the primary task on recall.
+`MemoryClient.agent_instructions()` returns compact read and write guidance for
+the host's agent instruction channel. MCP initialization and the Hermes provider
+expose the same core guidance. It tells the working agent to recall when useful,
+write or amend durable knowledge during normal work, and save nothing when
+nothing durable emerged. The host must also supply an actual lifecycle trigger;
+MCP instructions alone do not prove the agent performed that review.
 
 Host operator surfaces can call `MemoryClient.inspect_record(record_id,
 logical_block_id=..., expected_revision_id=...)` to inspect one exact revision.

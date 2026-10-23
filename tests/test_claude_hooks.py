@@ -1,3 +1,4 @@
+import io
 import json
 from pathlib import Path
 
@@ -337,6 +338,34 @@ def test_stop_is_turn_completion_while_session_end_closes_the_session(
     assert end["ok"] is True
     assert pool.host_state_calls[0][1]["event_type"] == "turn_completion"
     assert pool.host_state_calls[1][1]["event_type"] == "session_boundary"
+
+
+def test_stop_command_requests_one_same_agent_review(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    from um_mem.integrations import claude_hooks
+
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(
+        claude_hooks,
+        "dispatch_claude_hook",
+        lambda *args, **kwargs: {"ok": True},
+    )
+    for active in (False, True):
+        payload = _payload(tmp_path, hook_event_name="Stop", stop_hook_active=active)
+        monkeypatch.setattr(
+            claude_hooks.sys,
+            "stdin",
+            io.TextIOWrapper(io.BytesIO(json.dumps(payload).encode("utf-8"))),
+        )
+        assert claude_hooks.main([]) == 0
+        output = capsys.readouterr().out
+        if active:
+            assert output == ""
+        else:
+            response = json.loads(output)
+            assert response["hookSpecificOutput"]["hookEventName"] == "Stop"
+            assert "save nothing" in response["hookSpecificOutput"]["additionalContext"]
 
 
 def test_capability_manifest_exposes_missing_turn_and_pre_turn_contracts_fail_closed() -> None:
