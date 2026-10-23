@@ -278,6 +278,8 @@ def test_lossless_atomic_record_survives_reopen_and_reports_coverage(
         )
         record = client.read_exact_record(record_id=result.memory_id)
         assert record.content == source
+        assert record.status == "candidate"
+        assert record.verification_status == "unverified"
         assert record.metadata["memory_mode"] == "lossless_atomic"
         assert record.metadata["summary_count"] == 0
     finally:

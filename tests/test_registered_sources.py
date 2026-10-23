@@ -2,8 +2,9 @@ import hashlib
 
 import pytest
 
+import um_mem.api as memory_api
 from um_mem import MemoryClient
-from um_mem.contracts import HostObservation
+from um_mem.contracts import EvidenceResolver, HostObservation, build_workspace_context
 from um_mem.memory import mcp_facade
 from um_mem.memory.backends.contracts import EdgeType
 from um_mem.memory.backends.sqlite_index import BackendSQLiteIndex
@@ -171,6 +172,19 @@ def test_bound_segments_use_utf8_offsets_and_union_coverage(tmp_path, monkeypatc
             },
         )
         assert first.saved
+        assert first.raw["status"] == "accepted"
+        assert first.raw["verification_status"] == "evidence_backed"
+        confirmed = client.read_exact_record(record_id=first.memory_id)
+        assert confirmed.status == "accepted"
+        assert confirmed.authority == "advisory"
+        assert confirmed.verification_status == "evidence_backed"
+        assert confirmed.verification_methods == ("artifact_inspection",)
+        reports = [ref for ref in confirmed.evidence_refs if ref.ref_type == "verification_report"]
+        assert len(reports) == 1
+        resolver = EvidenceResolver(
+            build_workspace_context(repo_root=tmp_path, workspace_root=tmp_path, workspace_id="ws")
+        )
+        assert resolver.validate_ref(reports[0]) == []
         assert first.raw["exact_source_coverage"] == 5 / 6
         assert first.raw["source_segments"][0]["speaker"] == "Ada"
         assert any(
@@ -262,6 +276,96 @@ def test_bound_segment_rejects_foreign_session_and_speaker_spoof(tmp_path) -> No
                 write_mode="lossless_atomic",
                 metadata={"source_segments": [{**segment, "speaker": "Bob"}]},
             )
+    finally:
+        index.close()
+
+
+def test_bound_segment_rejects_foreign_project_in_same_session(tmp_path) -> None:
+    index = BackendSQLiteIndex(tmp_path / "index.sqlite", backend_id="test", workspace_id="ws")
+    source_owner = MemoryClient(
+        tmp_path,
+        workspace_id="ws",
+        project_id="project-a",
+        session_id="session-a",
+        backend_instance=index,
+    )
+    other_project = MemoryClient(
+        tmp_path,
+        workspace_id="ws",
+        project_id="project-b",
+        session_id="session-a",
+        backend_instance=index,
+    )
+    try:
+        source = source_owner.register_source(
+            source_id="turn-1", text="value", producer_id="trusted-host"
+        )
+        with pytest.raises(ValueError, match="source segment registration"):
+            other_project.remember(
+                "value",
+                requested_block_id="stable_project_facts",
+                write_mode="lossless_atomic",
+                metadata={
+                    "source_segments": [
+                        {
+                            "source_id": "turn-1",
+                            "source_sha256": source["source_sha256"],
+                            "byte_start": 0,
+                            "byte_end": 5,
+                            "text": "value",
+                        }
+                    ]
+                },
+            )
+    finally:
+        index.close()
+
+
+def test_exact_source_write_recovers_after_lost_receipt(tmp_path, monkeypatch) -> None:
+    index = BackendSQLiteIndex(tmp_path / "index.sqlite", backend_id="test", workspace_id="ws")
+    client = MemoryClient(
+        tmp_path, workspace_id="ws", session_id="session-a", backend_instance=index
+    )
+    try:
+        source = client.register_source(source_id="turn-1", text="fact", producer_id="host")
+        segment = {
+            "source_id": "turn-1",
+            "source_sha256": source["source_sha256"],
+            "byte_start": 0,
+            "byte_end": 4,
+            "text": "fact",
+        }
+        original_complete = memory_api.complete_remember_receipt
+
+        def lose_receipt(*args, **kwargs):
+            raise OSError("simulated interruption after canonical write")
+
+        monkeypatch.setattr(memory_api, "complete_remember_receipt", lose_receipt)
+        with pytest.raises(OSError, match="simulated interruption"):
+            client.remember(
+                "fact",
+                requested_block_id="stable_project_facts",
+                write_mode="lossless_atomic",
+                operation_id="exact-source-retry",
+                metadata={"source_segments": [segment]},
+            )
+        monkeypatch.setattr(memory_api, "complete_remember_receipt", original_complete)
+        replay = client.remember(
+            "fact",
+            requested_block_id="stable_project_facts",
+            write_mode="lossless_atomic",
+            operation_id="exact-source-retry",
+            metadata={"source_segments": [segment]},
+        )
+        assert replay.saved is True
+        assert replay.raw["replayed"] is True
+        assert client.read_exact_record(record_id=replay.memory_id).verification_status == (
+            "evidence_backed"
+        )
+        rows = EvidenceResolver(
+            build_workspace_context(repo_root=tmp_path, workspace_root=tmp_path, workspace_id="ws")
+        ).ledger_rows()
+        assert sum(row.get("tool") == "exact_source_fidelity" for row in rows) == 1
     finally:
         index.close()
 

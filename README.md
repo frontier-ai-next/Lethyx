@@ -182,6 +182,39 @@ memory.archive_block(
 
 Agent-authored writes are candidates by default. Durable writes use exactly one
 selected backend per workspace: `mempalace`, `hindsight`, `mnemosyne`, or `zvec`.
+An exact exception needs no second model: a host can call `register_source()`
+with its own source text, then write a `lossless_atomic` record whose segments
+include that source ID, full source SHA-256, and UTF-8 byte offsets. UM-MEM
+checks every byte against the registered host witness during `remember()`.
+Only a fully bound exact extract becomes an advisory `accepted` record with
+`verification_status=evidence_backed`; its verification scope is source fidelity,
+not the truth of the source or a paraphrased claim. Unregistered extracts and
+ordinary notes remain unverified candidates. This path never grants directive
+authority; semantic promotion retains its independent review gate.
+
+```python
+source_text = "Use local models."
+source = memory.register_source(
+    source_id="host-turn-42", text=source_text, producer_id="host", speaker="user"
+)
+memory.remember(
+    source_text,
+    requested_block_id="stable_project_facts",
+    write_mode="lossless_atomic",
+    metadata={
+        "source_segments": [
+            {
+                "source_id": "host-turn-42",
+                "source_sha256": source["source_sha256"],
+                "byte_start": 0,
+                "byte_end": len(source_text.encode("utf-8")),
+                "text": source_text,
+            }
+        ]
+    },
+)
+```
+
 Different leaves are native partitions of that selected backend, not independently
 selected providers. Cross-backend federation and score calibration are not implemented.
 Canonical and sidecar schemas are version-exact and require a clean-store

@@ -52,7 +52,10 @@ from um_mem.contracts import (
     json_ready,
 )
 from um_mem.contracts.hashing import hash_value
-from um_mem.contracts.ledger import append_verification_report_ledger_event
+from um_mem.contracts.ledger import (
+    append_supervisor_ledger_event,
+    append_verification_report_ledger_event,
+)
 from um_mem.contracts.memory import (
     CURRENT_SCHEMA_VERSION,
     DeliveryPolicy,
@@ -4276,6 +4279,7 @@ class MemoryClient:
         ):
             raise ValueError("child_claims must use canonical TurnChildClaim values")
         meta = dict(metadata or {})
+        exact_registered_source = False
         if write_mode == "lossless_atomic":
             raw_segments = meta.get("source_segments")
             if raw_segments is None:
@@ -4360,7 +4364,11 @@ class MemoryClient:
                     ):
                         raise ValueError("source segment byte range is invalid")
                     witness = self._registered_source_record(source_segment_id)
-                    if witness is None or witness.session_id != lineage.session_id:
+                    if (
+                        witness is None
+                        or witness.session_id != lineage.session_id
+                        or witness.project_id != lineage.project_id
+                    ):
                         raise ValueError("source segment registration is unavailable in this scope")
                     source_bytes = witness.content.encode("utf-8")
                     source_sha256 = hashlib.sha256(source_bytes).hexdigest()
@@ -4434,6 +4442,7 @@ class MemoryClient:
                         end = max(end, stop)
                 meta["exact_source_coverage"] = union_bytes / sum(registered_sizes.values())
                 meta["source_coverage_status"] = "registered"
+                exact_registered_source = True
             else:
                 meta["exact_source_coverage"] = 0.0
                 meta["source_coverage_status"] = "unregistered"
@@ -4569,7 +4578,85 @@ class MemoryClient:
                     },
                 )
             )
+        if exact_registered_source:
+            exact_source_result = {
+                "verifier_id": "um-mem:exact-source-fidelity/1",
+                "method": "utf8_byte_equality",
+                "content_sha256": hashlib.sha256(content.encode("utf-8")).hexdigest(),
+                "source_segments": [
+                    {
+                        key: segment[key]
+                        for key in (
+                            "source_id",
+                            "source_sha256",
+                            "byte_start",
+                            "byte_end",
+                            "sha256",
+                            "witness_id",
+                        )
+                    }
+                    for segment in meta["source_segments"]
+                ],
+                "profile_id": self.profile_id,
+                "session_id": lineage.session_id,
+                "target_block_id": route.block_id,
+                "scope": route.scope,
+                "scope_id": scope_identity,
+                "passed": True,
+            }
+            prior_report: EvidenceRef | None = None
+            if operation_id:
+                operation_key = derive_canonical_key(
+                    workspace_id=self.workspace_id,
+                    profile_id=self.profile_id,
+                    kind=kind,
+                    record_id="operation_" + hashlib.sha256(operation_id.encode()).hexdigest(),
+                )
+                prior = self.backend.get_block(block_id_for_canonical_key(operation_key))
+                if prior is not None:
+                    if (
+                        prior.content != content
+                        or prior.profile_id != self.profile_id
+                        or prior.session_id != lineage.session_id
+                        or prior.project_id != lineage.project_id
+                        or prior.status != "accepted"
+                        or prior.verification_status != "evidence_backed"
+                        or prior.metadata.get("operation_id") != operation_id
+                        or prior.metadata.get("source_segments") != meta["source_segments"]
+                    ):
+                        raise ValueError("creation operation receipt conflict")
+                    prior_report = next(
+                        (
+                            ref
+                            for ref in prior.evidence_refs
+                            if ref.ref_type == "verification_report"
+                            and ref.producer_id == "um-mem:exact-source-fidelity/1"
+                        ),
+                        None,
+                    )
+                    if prior_report is None:
+                        raise ValueError("creation operation receipt conflict")
+            if prior_report is None:
+                report = append_supervisor_ledger_event(
+                    repo_root=self.repo_root,
+                    workspace_id=self.workspace_id,
+                    actor="verifier",
+                    stage_id="exact_source_fidelity",
+                    tool="exact_source_fidelity",
+                    result=exact_source_result,
+                    result_hash=hash_value(exact_source_result),
+                )
+                prior_report = EvidenceRef(
+                    ref_type="verification_report",
+                    ref_id=report.event_id,
+                    hash=report.event_hash,
+                    produced_by="verifier",
+                    producer_id="um-mem:exact-source-fidelity/1",
+                )
+            evidence_values.append(prior_report)
         routed_metadata = {**meta, "route_decision_reason": route.reason, "write_mode": write_mode}
+        if exact_registered_source:
+            routed_metadata["verification_scope"] = "exact_source_fidelity"
         if operation_id:
             routed_metadata["operation_id"] = operation_id
         if source_id:
@@ -4586,16 +4673,20 @@ class MemoryClient:
                 backend_partition_id=self._backend_partition_id_for_block(route.block_id),
             ),
             kind=kind,
-            status=route.status,
+            status="accepted" if exact_registered_source else route.status,
             retention=route.retention,
             delivery_policy=route.delivery_policy,
             temperature=route.temperature,
             authority=route.authority,
             trust_level=route.trust_level,
             scope=route.scope,
-            verification_status=route.verification_status,
-            verification_methods=route.verification_methods,
-            promotion_decision=route.promotion_decision,
+            verification_status=(
+                "evidence_backed" if exact_registered_source else route.verification_status
+            ),
+            verification_methods=(
+                ("artifact_inspection",) if exact_registered_source else route.verification_methods
+            ),
+            promotion_decision="accepted" if exact_registered_source else route.promotion_decision,
             user_id=lineage.user_id,
             workspace_id=self.workspace_id,
             profile_id=self.profile_id,
@@ -4738,6 +4829,8 @@ class MemoryClient:
         raw["user_id"] = record.user_id
         raw.setdefault("route_decision", route_payload)
         raw.setdefault("mutation_action", mutation_action)
+        raw["status"] = record.status
+        raw["verification_status"] = record.verification_status
         if superseded_block_id:
             raw.setdefault("superseded_block_id", superseded_block_id)
         saved = write_result.saved
@@ -4862,6 +4955,7 @@ class MemoryClient:
                 or existing.profile_id != self.profile_id
                 or existing.session_id != lineage.session_id
                 or existing.task_id != lineage.task_id
+                or existing.project_id != lineage.project_id
                 or existing.content != text
                 or existing.metadata.get("host_event_id") != source_id
                 or existing.metadata.get("host_event_kind") != "conversation_turn"

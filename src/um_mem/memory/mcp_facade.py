@@ -2316,6 +2316,8 @@ def um_mem_remember(
             "requested_block_id": selected_block_id,
             "route_decision": _as_jsonable(route_decision),
             "route_rejected": route_rejected,
+            "status": str(raw.get("status") or "candidate"),
+            "verification_status": str(raw.get("verification_status") or "unverified"),
         }
         # Public callers must distinguish the durable ack from native readiness
         # without interpreting the backend's diagnostic raw payload.

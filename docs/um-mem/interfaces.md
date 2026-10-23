@@ -54,6 +54,12 @@ Ordinary MCP `remember` calls create unverified candidates. The Codex and Claude
 Code MCP connections do not run an independent semantic verifier or publish
 candidates as verified records; hosts must supply an evidence-bound verification
 and promotion flow to do that.
+For any host using the Python API, `register_source()` can first capture exact
+host-owned source bytes. A `lossless_atomic` write with byte ranges bound to that
+registration is automatically checked and retained as advisory `evidence_backed`.
+This confirms the extract's fidelity to the registered source, without a model
+call or a claim that the source itself is true. Tools-only MCP has no trusted
+source-registration surface, so its ordinary writes still remain candidates.
 Claude/Codex `Stop` events mean a completed response/turn; only `SessionEnd`
 means the session ended.
 

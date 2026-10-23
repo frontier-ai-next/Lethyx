@@ -432,8 +432,14 @@ candidate revision, source evidence, profile, destination leaf and scope. The
 assessment records the actual author and independent verifier model identities,
 versioned verifier instructions, four typed outcomes and reasons. A generic
 passed-test receipt supplies evidence but cannot verify candidate meaning.
-Quoted instruction text is evaluated by the semantic verifier; deterministic
-code enforces structure, scope, revisions and typed outcomes. Publication replay
+Exact extracts have a narrower deterministic route: when a host has registered
+source bytes, `lossless_atomic` checks every UTF-8 segment against its source
+hash and byte range during writing. The matching record is accepted as advisory
+`evidence_backed`, with an exact-source ledger receipt. This certifies only
+faithful copying; it cannot certify an inferred claim or grant directive authority.
+For semantic publication, quoted instruction text is evaluated by the semantic
+verifier; deterministic code enforces structure, scope, revisions and typed
+outcomes. Publication replay
 acknowledges the original immutable published revision without republishing a
 newer head.
 
