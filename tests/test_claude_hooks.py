@@ -82,32 +82,21 @@ def test_tool_hook_captures_stable_content_free_lifecycle_identity(tmp_path: Pat
         "ok": True,
         "captured": True,
         "event": "PostToolUse",
-        "memory_id": "claude-event",
     }
     assert second["ok"] is True
-    identity, tool, arguments, kwargs = pool.calls[0]
-    assert identity.caller_role == "host_hook"
+    assert pool.calls == []
+    identity, host_state, kwargs = pool.host_state_calls[0]
+    assert identity.caller_role == "host_state"
     assert identity.repo_root == tmp_path
     assert identity.workspace_id == "alpha"
     assert identity.backend == "mempalace"
-    assert tool == "remember"
     assert kwargs["session_id"] == "claude-session-123"
-    assert kwargs["mutation_correlation_id"] == pool.calls[1][3]["mutation_correlation_id"]
-    assert arguments["content"] == "Observed Claude Code lifecycle event: PostToolUse."
-    assert arguments["kind"] == "observation"
-    assert arguments["metadata"] == {
-        "host_adapter": "claude_hooks",
-        "host_event_name": "PostToolUse",
-        "host_event_schema_version": 1,
-        "host_identity_sha256": arguments["metadata"]["host_identity_sha256"],
-    }
-    serialized = json.dumps(arguments, sort_keys=True)
+    serialized = json.dumps(host_state, sort_keys=True)
     assert "RAW_CLAUDE_TOOL_INPUT_SECRET" not in serialized
     assert "RAW_CLAUDE_TOOL_OUTPUT_SECRET" not in serialized
     assert "private-transcript.jsonl" not in serialized
     assert "claude-session-123" not in serialized
     assert "toolu-456" not in serialized
-    host_state = pool.host_state_calls[0][1]
     assert host_state["event_type"] == "tool_result"
     assert host_state["capability_codes"] == ("claude_code_hook", "typed_host_state")
     assert host_state["event_id"] == pool.host_state_calls[1][1]["event_id"]
@@ -141,14 +130,12 @@ def test_task_and_subagent_events_keep_typed_lineage_without_raw_subjects(
     )
 
     assert task["ok"] is True and subagent["ok"] is True
-    task_args = pool.calls[0][2]
-    subagent_args = pool.calls[1][2]
-    assert task_args["stage_id"].startswith("claude-task:")
-    assert task_args["subtask_id"] == ""
-    assert subagent_args["subtask_id"].startswith("claude-subagent:")
-    assert pool.calls[1][3]["scope_lineage"].task_id.startswith("claude-session-task:")
-    assert pool.calls[1][3]["scope_lineage"].subtask_id == subagent_args["subtask_id"]
-    serialized = json.dumps([task_args, subagent_args], sort_keys=True)
+    assert pool.calls == []
+    task_state = pool.host_state_calls[0][1]
+    subagent_state = pool.host_state_calls[1][1]
+    assert task_state["stage_id"].startswith("claude-task:")
+    assert task_state["event_id"] != subagent_state["event_id"]
+    serialized = json.dumps([task_state, subagent_state], sort_keys=True)
     assert "RAW_TASK_SUBJECT_SECRET" not in serialized
     assert "RAW_SUBAGENT_OUTPUT_SECRET" not in serialized
     assert "task-789" not in serialized
@@ -181,7 +168,8 @@ def test_post_tool_batch_uses_only_tool_names_and_ids_for_replay_identity(
     )
 
     assert result["ok"] is True
-    serialized = json.dumps(pool.calls[0][2], sort_keys=True)
+    assert pool.calls == []
+    serialized = json.dumps(pool.host_state_calls[0][1], sort_keys=True)
     assert "RAW_FILE_PATH_SECRET" not in serialized
     assert "RAW_FILE_CONTENT_SECRET" not in serialized
     assert "RAW_COMMAND_SECRET" not in serialized
@@ -212,7 +200,8 @@ def test_official_lifecycle_event_shapes_are_accepted_content_free(
     )
 
     assert result["ok"] is True
-    serialized = json.dumps(pool.calls[0][2], sort_keys=True)
+    assert pool.calls == []
+    serialized = json.dumps(pool.host_state_calls[0][1], sort_keys=True)
     for value in event_payload.values():
         if isinstance(value, str) and value not in {
             event_payload["hook_event_name"],

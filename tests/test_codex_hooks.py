@@ -61,6 +61,15 @@ class FailingClientPool(CapturingClientPool):
         del identity, tool, arguments, kwargs
         raise RuntimeError("listener unavailable")
 
+    def submit_host_state(
+        self,
+        identity: object,
+        event: dict[str, object],
+        **kwargs: object,
+    ) -> dict[str, object]:
+        del identity, event, kwargs
+        raise RuntimeError("listener unavailable")
+
 
 def _payload(tmp_path: Path, **overrides: object) -> dict[str, object]:
     payload: dict[str, object] = {
@@ -94,31 +103,8 @@ def test_user_prompt_uses_host_hook_lease_without_forwarding_raw_host_content(
         "ok": True,
         "captured": True,
         "event": "UserPromptSubmit",
-        "memory_id": "captured-event",
     }
-    [(identity, tool, arguments, kwargs)] = pool.calls
-    assert identity.caller_role == "host_hook"
-    assert identity.repo_root == tmp_path
-    assert identity.workspace_id == "alpha"
-    assert identity.backend == "mempalace"
-    assert tool == "remember"
-    assert kwargs["session_id"] == "codex-session-123"
-    assert kwargs["timeout_seconds"] == 8
-    assert isinstance(kwargs["mutation_correlation_id"], str)
-    assert kwargs["mutation_correlation_id"].startswith("codex-hook:")
-    serialized = json.dumps(arguments, sort_keys=True)
-    assert "RAW_PROMPT_SECRET_MUST_NOT_REACH_MEMORY" not in serialized
-    assert "private-transcript.jsonl" not in serialized
-    assert "codex-session-123" not in serialized
-    assert "codex-turn-456" not in serialized
-    assert arguments["content"] == "Observed Codex lifecycle event: UserPromptSubmit."
-    assert arguments["kind"] == "observation"
-    assert arguments["metadata"] == {
-        "host_adapter": "codex_hooks",
-        "host_event_name": "UserPromptSubmit",
-        "host_event_schema_version": 1,
-        "host_identity_sha256": arguments["metadata"]["host_identity_sha256"],
-    }
+    assert pool.calls == []
     [(host_state_identity, host_state, host_state_kwargs)] = pool.host_state_calls
     assert host_state_identity.caller_role == "host_state"
     assert host_state_kwargs["session_id"] == "codex-session-123"
@@ -174,16 +160,14 @@ def test_tool_event_has_stable_replay_key_and_drops_tool_input_and_output(tmp_pa
 
     assert first["ok"] is True
     assert second["ok"] is True
-    assert (
-        pool.calls[0][3]["mutation_correlation_id"] == pool.calls[1][3]["mutation_correlation_id"]
-    )
+    assert pool.calls == []
     assert pool.host_state_calls[0][1]["event_id"] == pool.host_state_calls[1][1]["event_id"]
-    serialized = json.dumps(pool.calls[0][2], sort_keys=True)
+    serialized = json.dumps(pool.host_state_calls[0][1], sort_keys=True)
     assert "RAW_TOOL_INPUT_SECRET" not in serialized
     assert "RAW_TOOL_OUTPUT_SECRET" not in serialized
 
 
-def test_subagent_hook_binds_the_hashed_subtask_to_the_service_lease(tmp_path: Path) -> None:
+def test_subagent_hook_preserves_distinct_content_free_event_identity(tmp_path: Path) -> None:
     pool = CapturingClientPool()
 
     result = dispatch_codex_hook(
@@ -198,14 +182,13 @@ def test_subagent_hook_binds_the_hashed_subtask_to_the_service_lease(tmp_path: P
     )
 
     assert result["ok"] is True
-    arguments = pool.calls[0][2]
-    lineage = pool.calls[0][3]["scope_lineage"]
-    assert arguments["subtask_id"].startswith("codex-subagent:")
-    assert lineage.task_id.startswith("codex-session-task:")
-    assert lineage.subtask_id == arguments["subtask_id"]
+    assert pool.calls == []
+    first_event = pool.host_state_calls[0][1]
+    assert first_event["event_type"] == "subgoal_transition"
+    assert "agent-789" not in json.dumps(first_event)
 
 
-def test_distinct_codex_hook_events_emit_distinct_semantic_source_ids(tmp_path: Path) -> None:
+def test_distinct_codex_hook_events_emit_distinct_host_state_ids(tmp_path: Path) -> None:
     pool = CapturingClientPool()
 
     first = dispatch_codex_hook(
@@ -224,7 +207,8 @@ def test_distinct_codex_hook_events_emit_distinct_semantic_source_ids(tmp_path: 
     )
 
     assert first["ok"] is True and second["ok"] is True
-    assert pool.calls[0][2]["source_id"] != pool.calls[1][2]["source_id"]
+    assert pool.calls == []
+    assert pool.host_state_calls[0][1]["event_id"] != pool.host_state_calls[1][1]["event_id"]
 
 
 def test_rejects_payload_cwd_that_does_not_match_hook_process_directory(tmp_path: Path) -> None:
@@ -290,13 +274,26 @@ def test_runner_uses_the_real_authenticated_listener_without_a_direct_backend(
             workspace_id="alpha",
             backend="mempalace",
         )
+        pool = LocalServiceClientPool()
+        try:
+            records = pool.call(
+                operator_identity,
+                "recent",
+                {"scope": "workspace", "scope_id": "alpha", "limit": 1},
+                timeout_seconds=15,
+                session_id="codex-session-123",
+            )
+        finally:
+            pool.close()
     finally:
         shutdown_local_service_listener(operator_identity)
 
     assert result["ok"] is True
     assert result["captured"] is True
     assert result["event"] == "SessionStart"
-    assert isinstance(result.get("memory_id"), str)
+    assert "memory_id" not in result
+    assert records["ok"] is True
+    assert records["records"] == []
 
 
 def test_prompt_context_uses_the_real_listener_and_scoped_candidate(tmp_path: Path) -> None:
@@ -698,7 +695,8 @@ def test_stop_is_turn_completion_and_session_end_is_a_distinct_boundary(
     assert end["ok"] is True
     assert pool.host_state_calls[0][1]["event_type"] == "turn_completion"
     assert pool.host_state_calls[1][1]["event_type"] == "session_boundary"
-    assert pool.calls[1][0].profile_id == "default"
+    assert pool.calls == []
+    assert pool.host_state_calls[1][0].profile_id == "default"
 
 
 def test_capability_manifest_remains_fail_closed_before_full_real_host_e2e() -> None:
@@ -737,7 +735,7 @@ def test_pre_tool_and_permission_hooks_capture_no_tool_input_and_never_decide_au
         assert result["ok"] is True
         assert hook_control_response(event_name) == {}
 
-    serialized = json.dumps([call[2] for call in pool.calls], sort_keys=True)
+    serialized = json.dumps([call[1] for call in pool.host_state_calls], sort_keys=True)
     assert "RAW_PRE_TOOL_COMMAND_SECRET" not in serialized
     assert "RAW_APPROVAL_REASON_SECRET" not in serialized
     assert pool.host_state_calls[0][1]["event_type"] == "prospective_trigger"

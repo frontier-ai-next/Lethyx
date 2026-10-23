@@ -5,9 +5,10 @@ UM-MEM has one memory model and several ways to reach it. Use the interface that
 ## Installing host integrations
 
 Claude Code and Codex use two complementary user-level connections: MCP exposes
-UM-MEM tools, while native hooks record bounded lifecycle events. Install the
-optional MCP dependency in the same Python environment used by the `um-mem`
-command, then install the host config:
+UM-MEM tools, while native hooks submit content-free lifecycle signals to the
+local host-state scheduler. Hook events do not create semantic memory records.
+Install the optional MCP dependency in the same Python environment used by the
+`um-mem` command, then install the host config:
 
 ```console
 python -m pip install "um-mem[mcp]"
@@ -38,9 +39,10 @@ exact session. If it has no usable context, the hook retrieves bounded memory
 from the current project by prompt and passes it as supplemental context. The
 project ID is derived from the normalized Git-root path; different worktrees
 of one repository currently have different IDs. Candidate records may
-appear in the fallback as unverified evidence; lifecycle-only hook records are
-omitted. This runs at the prompt boundary, not before every internal model
-request. An active mask must be deliberately set for the Codex session; a mask
+appear in the fallback as unverified evidence. Old lifecycle-only hook records,
+if present in an existing store, are omitted. This runs at the prompt boundary,
+not before every internal model request. An active mask must be deliberately set
+for the Codex session; a mask
 from another session is not inherited.
 Older workspace records remain available through explicit MCP search. The
 user-level Codex MCP process has no trusted identity for the current project,
@@ -48,6 +50,10 @@ so a new record written through that global MCP process to a workspace leaf
 does not enter project-only automatic context. A project-aware host binding is
 required for automatic delivery of those new writes; do not set one global
 `UM_MEM_PROJECT_ID` for multiple projects.
+Ordinary MCP `remember` calls create unverified candidates. The Codex and Claude
+Code MCP connections do not run an independent semantic verifier or publish
+candidates as verified records; hosts must supply an evidence-bound verification
+and promotion flow to do that.
 Claude/Codex `Stop` events mean a completed response/turn; only `SessionEnd`
 means the session ended.
 

@@ -11,7 +11,6 @@ from um_mem.memory.local_service import (
     LocalServiceClientPool,
     LocalServiceIdentity,
     build_local_service_identity,
-    local_service_scope_lineage,
 )
 from um_mem.memory.scopes import ScopeLineage
 
@@ -68,39 +67,20 @@ def capture_host_hook(
     timeout_seconds: int,
     pool: HostHookClientPool | None,
 ) -> dict[str, object]:
-    """Persist one filtered lifecycle fact through exactly one local service writer."""
+    """Submit a content-free host event without creating a semantic memory record."""
 
     try:
-        identity = build_local_service_identity(
+        state_identity = build_local_service_identity(
             repo_root=repo_root,
             workspace_id=workspace_id,
             profile_id=profile_id,
             backend=backend,
-            caller_role="host_hook",
-        )
-        state_identity = build_local_service_identity(
-            repo_root=identity.repo_root,
-            workspace_id=identity.workspace_id,
-            profile_id=identity.profile_id,
-            backend=identity.backend,
             caller_role="host_state",
         )
     except ValueError:
         return {"ok": False, "error": "local service identity rejected"}
 
     event_digest = _event_digest(event)
-    memory_arguments = _memory_arguments(event, event_digest)
-    subtask_id = str(memory_arguments["subtask_id"])
-    scope_lineage = local_service_scope_lineage(
-        identity,
-        session_id=event.session_id,
-        task_id=(
-            _scoped_identifier(event.host_slug, "session-task", event.session_id)
-            if subtask_id
-            else ""
-        ),
-        subtask_id=subtask_id,
-    )
     client_pool = pool if pool is not None else LocalServiceClientPool()
     owns_pool = pool is None
     try:
@@ -112,31 +92,16 @@ def capture_host_hook(
         )
         if state_response.get("ok") is not True:
             return {"ok": False, "error": "local service host-state scheduling failed"}
-        response = client_pool.call(
-            identity,
-            "remember",
-            memory_arguments,
-            timeout_seconds=timeout_seconds,
-            mutation_correlation_id=f"{event.host_slug}-hook:{event_digest}",
-            session_id=event.session_id,
-            scope_lineage=scope_lineage,
-        )
     except (OSError, RuntimeError, TypeError, ValueError):
         return {"ok": False, "error": "local service host capture failed"}
     finally:
         if owns_pool:
             client_pool.close()
-    if response.get("ok") is not True:
-        return {"ok": False, "error": "local service host capture failed"}
-    result: dict[str, object] = {
+    return {
         "ok": True,
         "captured": True,
         "event": event.event_name,
     }
-    memory_id = response.get("memory_id")
-    if isinstance(memory_id, str) and memory_id:
-        result["memory_id"] = memory_id
-    return result
 
 
 def git_root(working_directory: Path) -> Path:
@@ -167,30 +132,6 @@ def _scoped_identifier(host_slug: str, kind: str, value: str) -> str:
     if not kind or not value:
         return ""
     return f"{host_slug}-{kind}:{_identifier_digest(value)}"
-
-
-def _memory_arguments(event: HostHookEvent, event_digest: str) -> dict[str, object]:
-    return {
-        "content": f"Observed {event.host_label} lifecycle event: {event.event_name}.",
-        "title": f"{event.host_label} {event.event_name}",
-        "kind": "observation",
-        "requested_block_id": "workspace_episodes",
-        "tags": [event.host_slug, "host_hook", "observed_event", event.event_name.lower()],
-        "source_id": f"{event.host_slug}-hook:{event.event_name}:{event_digest[:24]}",
-        "run_id": f"{event.host_slug}-session:{_identifier_digest(event.session_id)}",
-        "stage_id": _scoped_identifier(event.host_slug, event.stage_kind, event.stage_id),
-        "subtask_id": _scoped_identifier(
-            event.host_slug,
-            event.subtask_kind,
-            event.subtask_id,
-        ),
-        "metadata": {
-            "host_adapter": event.adapter_id,
-            "host_event_name": event.event_name,
-            "host_event_schema_version": event.schema_version,
-            "host_identity_sha256": event_digest,
-        },
-    }
 
 
 def _host_state_arguments(
